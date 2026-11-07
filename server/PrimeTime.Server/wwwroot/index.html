@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PrimeTime</title>
+  <link rel="stylesheet" href="app.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <span class="brand">PrimeTime</span>
+    <span class="topbar-right" id="userbar" hidden>
+      <span id="current-user"></span>
+      <button type="button" class="link" id="logout">Sign out</button>
+    </span>
+  </header>
+
+  <main>
+    <p id="loading" class="muted">Loading…</p>
+
+    <!-- First run: create the admin account -->
+    <section id="setup-view" class="card narrow" hidden>
+      <h1>Welcome to PrimeTime</h1>
+      <p class="muted">Create the admin account you'll use to manage this server.</p>
+      <form id="setup-form" autocomplete="on">
+        <label>Username <input name="username" autocomplete="username" required maxlength="64"></label>
+        <label>Password <input name="password" type="password" autocomplete="new-password" required minlength="8"></label>
+        <label>Confirm password <input name="confirm" type="password" autocomplete="new-password" required minlength="8"></label>
+        <p class="error" role="alert" hidden></p>
+        <button type="submit">Create admin account</button>
+      </form>
+    </section>
+
+    <!-- Sign in -->
+    <section id="login-view" class="card narrow" hidden>
+      <h1>Sign in</h1>
+      <form id="login-form" autocomplete="on">
+        <label>Username <input name="username" autocomplete="username" required></label>
+        <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+        <p class="error" role="alert" hidden></p>
+        <button type="submit">Sign in</button>
+      </form>
+    </section>
+
+    <!-- Dashboard -->
+    <section id="dashboard-view" hidden>
+      <div class="card">
+        <div class="card-head">
+          <h2>Jellyfin server</h2>
+          <span class="badge" id="conn-badge">Not connected</span>
+        </div>
+
+        <div id="conn-summary" hidden>
+          <dl class="facts">
+            <dt>Server</dt><dd id="conn-name"></dd>
+            <dt>Version</dt><dd id="conn-version"></dd>
+            <dt>URL</dt><dd id="conn-url"></dd>
+            <dt>Signed in with</dt><dd id="conn-auth"></dd>
+          </dl>
+          <p class="error" id="conn-error" role="alert" hidden></p>
+        </div>
+
+        <form id="jellyfin-form" autocomplete="off">
+          <label>Server URL
+            <input name="url" placeholder="http://192.168.1.10:8096" required inputmode="url">
+          </label>
+
+          <fieldset class="segmented">
+            <legend>Authentication</legend>
+            <label><input type="radio" name="authMethod" value="apiKey" checked> API key</label>
+            <label><input type="radio" name="authMethod" value="password"> Username and password</label>
+          </fieldset>
+
+          <div data-auth="apiKey">
+            <label>API key
+              <input name="apiKey" type="password" autocomplete="off" spellcheck="false">
+            </label>
+            <p class="hint">Create one in Jellyfin under Dashboard → API Keys.
+              <span id="apikey-keep" hidden>Leave blank to keep the saved key.</span></p>
+          </div>
+
+          <div data-auth="password" hidden>
+            <label>Jellyfin username <input name="username" autocomplete="off"></label>
+            <label>Jellyfin password <input name="password" type="password" autocomplete="off"></label>
+            <p class="hint">PrimeTime swaps these for an access token and doesn't store the password.</p>
+          </div>
+
+          <p class="error" role="alert" hidden></p>
+          <p class="success" role="status" hidden></p>
+
+          <div class="actions">
+            <button type="button" class="secondary" id="test-btn">Test connection</button>
+            <button type="submit" id="save-btn">Save</button>
+            <button type="button" class="danger link" id="disconnect-btn" hidden>Disconnect</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card" id="libraries-card" hidden>
+        <div class="card-head">
+          <h2>Libraries</h2>
+          <span class="muted" id="libraries-note"></span>
+        </div>
+        <table class="libraries">
+          <thead><tr><th>Name</th><th>Type</th><th>Folders</th></tr></thead>
+          <tbody id="libraries-body"></tbody>
+        </table>
+        <p class="muted" id="libraries-empty" hidden>This server has no libraries yet.</p>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

@@ -1,0 +1,5 @@
+<Solution>
+  <Folder Name="/server/">
+    <Project Path="server/PrimeTime.Server/PrimeTime.Server.csproj" />
+  </Folder>
+</Solution>
