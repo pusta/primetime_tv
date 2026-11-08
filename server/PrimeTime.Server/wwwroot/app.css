@@ -1,0 +1,141 @@
+:root {
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --text: #1b1d22;
+  --muted: #646a76;
+  --border: #dde0e6;
+  --accent: #5b3fd6;
+  --accent-text: #ffffff;
+  --danger: #c0352b;
+  --ok: #1f7a4a;
+  --ok-bg: #e3f4ea;
+  --warn-bg: #fdecea;
+  --radius: 10px;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111317;
+    --surface: #1b1e24;
+    --text: #e8eaee;
+    --muted: #9aa1ad;
+    --border: #2d323b;
+    --accent: #8f7bff;
+    --accent-text: #120d2b;
+    --danger: #ff7a6e;
+    --ok: #6fd69c;
+    --ok-bg: #173225;
+    --warn-bg: #3a1d1a;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand { font-weight: 700; letter-spacing: 0.02em; }
+.topbar-right { display: flex; gap: 12px; align-items: center; color: var(--muted); }
+
+main { max-width: 860px; margin: 24px auto; padding: 0 16px; }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.narrow { max-width: 420px; margin: 40px auto; }
+
+.card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+
+h1 { font-size: 1.4rem; margin: 0 0 8px; }
+h2 { font-size: 1.1rem; margin: 0; }
+
+form { display: grid; gap: 14px; margin-top: 16px; }
+
+label { display: grid; gap: 4px; font-weight: 500; }
+
+input:not([type="radio"]) {
+  font: inherit;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  width: 100%;
+}
+
+input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+fieldset.segmented { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 16px; }
+fieldset.segmented legend { font-weight: 500; margin-bottom: 4px; }
+fieldset.segmented label { display: flex; align-items: center; gap: 6px; font-weight: 400; }
+
+button {
+  font: inherit;
+  font-weight: 600;
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+  cursor: pointer;
+}
+
+button.secondary { background: transparent; color: var(--accent); }
+button.link { background: none; border: 0; padding: 0; color: var(--accent); font-weight: 500; }
+button.danger { color: var(--danger); }
+button:disabled { opacity: 0.6; cursor: progress; }
+
+.actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.actions .danger { margin-left: auto; }
+
+.muted, .hint { color: var(--muted); }
+.hint { margin: 0; font-size: 0.9rem; }
+
+.error, .success { margin: 0; padding: 8px 12px; border-radius: 8px; }
+.error { color: var(--danger); background: var(--warn-bg); }
+.success { color: var(--ok); background: var(--ok-bg); }
+
+.badge {
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--warn-bg);
+  color: var(--danger);
+  white-space: nowrap;
+}
+.badge.ok { background: var(--ok-bg); color: var(--ok); }
+
+.facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 16px 0 0; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; overflow-wrap: anywhere; }
+
+table.libraries { width: 100%; border-collapse: collapse; margin-top: 12px; }
+.libraries th, .libraries td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.libraries th { color: var(--muted); font-weight: 500; font-size: 0.9rem; }
+.libraries td.paths { color: var(--muted); font-size: 0.85rem; overflow-wrap: anywhere; }
+
+@media (max-width: 560px) {
+  .libraries th:nth-child(3), .libraries td:nth-child(3) { display: none; }
+}
+
+[hidden] { display: none !important; }

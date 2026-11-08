@@ -1,0 +1,24 @@
+# PrimeTime: turns a Jellyfin server into a live-TV-style service.
+# Copy .env.example to .env to change the defaults, then run: docker compose up --build
+
+services:
+  primetime:
+    build: .
+    image: primetime-tv:dev
+    container_name: primetime
+    restart: unless-stopped
+    ports:
+      - "${PRIMETIME_HTTP_PORT:-8080}:8080"
+    environment:
+      TZ: ${TZ:-UTC}
+      Logging__LogLevel__Default: ${PRIMETIME_LOG_LEVEL:-Information}
+    volumes:
+      # SQLite database and the encryption keys for saved credentials.
+      - primetime-data:/data
+    extra_hosts:
+      # Lets the container reach a Jellyfin server running on this machine
+      # at http://host.docker.internal:8096 (built in on Docker Desktop, needed on Linux).
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  primetime-data:
