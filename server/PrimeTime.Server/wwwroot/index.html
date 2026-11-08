@@ -11,8 +11,8 @@
   <header class="topbar">
     <span class="brand">PrimeTime</span>
     <nav class="mainnav" id="mainnav" aria-label="Main" hidden>
-      <a href="#/" data-section="library">Library</a>
-      <a href="#/settings/scheduled-tasks" data-section="settings">Settings</a>
+      <a href="#/guide" data-section="guide">Guide</a>
+      <a href="#/settings/library" data-section="settings">Settings</a>
     </nav>
     <span class="topbar-right" id="userbar" hidden>
       <span id="current-user"></span>
@@ -47,9 +47,53 @@
       </form>
     </section>
 
-    <!-- Dashboard -->
-    <section id="dashboard-view" hidden>
-      <div class="card">
+    <!-- First-run setup: only shown until the first scan finishes -->
+    <section id="wizard-view" class="wizard" hidden>
+      <h1>Set up PrimeTime</h1>
+      <ol class="steps" id="wizard-steps">
+        <li data-step="1">Connect Jellyfin</li>
+        <li data-step="2">Choose libraries</li>
+        <li data-step="3">First scan</li>
+      </ol>
+      <div id="wizard-slot"></div>
+      <div class="card" id="wizard-scan" hidden>
+        <h2>Scanning your libraries</h2>
+        <p class="muted" id="wizard-scan-status" role="status"></p>
+        <progress id="wizard-progress"></progress>
+        <p class="error" id="wizard-scan-error" role="alert" hidden></p>
+        <div class="actions" id="wizard-scan-actions" hidden>
+          <button type="button" id="wizard-retry">Try again</button>
+          <button type="button" class="secondary" id="wizard-change">Change libraries</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Guide (placeholder) -->
+    <section id="guide-view" hidden>
+      <h1>Guide</h1>
+      <div class="card guide-empty">
+        <svg class="tv" viewBox="0 0 480 340" role="img" aria-label="Outline of a television">
+          <rect x="16" y="16" width="448" height="264" rx="24"/>
+          <rect x="42" y="42" width="396" height="212" rx="10"/>
+          <path d="M190 280 170 322M290 280l20 42M136 322h208"/>
+        </svg>
+        <p class="muted">Your channel guide will appear here.</p>
+      </div>
+    </section>
+
+    <!-- Settings -->
+    <section id="settings-view" hidden>
+      <h1>Settings</h1>
+      <div class="settings">
+        <nav class="subnav" aria-label="Settings">
+          <a href="#/settings/library" data-sub="library">Library</a>
+          <a href="#/settings/scheduled-tasks" data-sub="tasks">Scheduled Tasks</a>
+        </nav>
+        <div class="settings-content">
+          <div id="settings-library" hidden>
+            <h2 class="section-title">Library</h2>
+            <div id="library-panels">
+      <div class="card" id="jellyfin-card">
         <div class="card-head">
           <h2>Jellyfin server</h2>
           <span class="badge" id="conn-badge">Not connected</span>
@@ -116,6 +160,7 @@
           <div class="actions">
             <button type="submit">Confirm and scan</button>
             <button type="button" class="secondary" id="library-cancel" hidden>Cancel</button>
+            <button type="button" class="secondary" id="library-back" hidden>Back</button>
           </div>
         </form>
 
@@ -139,18 +184,12 @@
           </div>
         </div>
       </div>
-    </section>
-
-    <!-- Settings -->
-    <section id="settings-view" hidden>
-      <h1>Settings</h1>
-      <div class="settings">
-        <nav class="subnav" aria-label="Settings">
-          <a href="#/settings/scheduled-tasks" class="active" aria-current="page">Scheduled Tasks</a>
-        </nav>
-        <div class="settings-content">
-          <h2 class="section-title">Scheduled Tasks</h2>
-          <div id="tasks-list"></div>
+            </div>
+          </div>
+          <div id="settings-tasks" hidden>
+            <h2 class="section-title">Scheduled Tasks</h2>
+            <div id="tasks-list"></div>
+          </div>
         </div>
       </div>
     </section>

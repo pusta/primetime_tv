@@ -170,6 +170,21 @@ select {
 .libraries .num { text-align: right; font-variant-numeric: tabular-nums; }
 .libraries td.warn { color: var(--danger); }
 
+.wizard { max-width: 640px; margin: 0 auto; }
+.steps { display: flex; flex-wrap: wrap; gap: 8px 24px; list-style: none; margin: 0 0 20px; padding: 0; counter-reset: step; }
+.steps li { color: var(--muted); counter-increment: step; }
+.steps li::before { content: counter(step) ". "; }
+.steps li.current { color: var(--text); font-weight: 600; }
+.steps li.done { color: var(--ok); }
+#wizard-scan { display: grid; gap: 12px; }
+#wizard-scan h2, #wizard-scan p { margin: 0; }
+#wizard-progress { width: 100%; accent-color: var(--accent); }
+#wizard-view #conn-summary, #wizard-view #disconnect-btn { display: none; }
+
+.guide-empty { display: grid; justify-items: center; gap: 16px; padding: 48px 20px; }
+.guide-empty p { margin: 0; }
+.tv { width: min(420px, 100%); height: auto; fill: none; stroke: var(--muted); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; }
+
 .settings { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 24px; }
 .subnav { display: grid; align-content: start; gap: 4px; }
 .subnav a { padding: 6px 10px; border-radius: 8px; }

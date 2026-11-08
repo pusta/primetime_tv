@@ -133,6 +133,13 @@ public sealed class Database
         );
         CREATE INDEX ix_task_runs_key ON task_runs (task_key, id);
         """,
+
+        // 3: installs that already finished a scan have completed first-run setup.
+        """
+        INSERT OR IGNORE INTO settings (key, value, updated_at)
+        SELECT 'setup_complete', 'true', strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+        WHERE EXISTS (SELECT 1 FROM libraries WHERE selected = 1 AND last_scanned_at IS NOT NULL);
+        """,
     ];
 
     public Database(PrimeTimeOptions options, ILogger<Database> logger)

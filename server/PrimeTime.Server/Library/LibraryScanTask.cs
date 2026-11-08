@@ -82,6 +82,12 @@ public sealed class LibraryScanTask(
         var status = errors.Count == 0 ? TaskRunStatus.Succeeded
             : errors.Count < selected.Count ? TaskRunStatus.Partial
             : TaskRunStatus.Failed;
+
+        if (status != TaskRunStatus.Failed && selected.Count > 0)
+        {
+            settings.MarkSetupComplete();
+        }
+
         return new TaskOutcome(status, summary, errors.Count == 0 ? null : string.Join(" ", errors));
     }
 
