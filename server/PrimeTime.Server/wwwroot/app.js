@@ -6,7 +6,7 @@
 const $ = (selector, root = document) => root.querySelector(selector);
 
 const views = [
-  "setup-view", "login-view", "wizard-view", "guide-view", "add-channel-view", "channel-editor-view", "settings-view", "player-view",
+  "setup-view", "login-view", "wizard-view", "guide-view", "add-channel-view", "channel-editor-view", "settings-view", "player-view", "link-view",
 ];
 const SCAN_TASK = "library-scan";
 const POLL_RUNNING_MS = 1500;
@@ -34,7 +34,7 @@ async function api(method, path, body) {
   if (response.status !== 204) {
     try { data = await response.json(); } catch { data = null; }
   }
-  const signedInOnly = ["/api/jellyfin", "/api/libraries", "/api/tasks", "/api/channels", "/api/catalog", "/api/guide", "/api/account", "/api/play"].some((p) => path.startsWith(p));
+  const signedInOnly = ["/api/jellyfin", "/api/libraries", "/api/tasks", "/api/channels", "/api/catalog", "/api/guide", "/api/account", "/api/play", "/api/devices"].some((p) => path.startsWith(p));
   if (response.status === 401 && signedInOnly) {
     await route();
     throw new Error("Your session expired. Sign in again.");
@@ -92,17 +92,21 @@ async function route() {
     return loadWizard();
   }
 
+  if (location.hash.startsWith("#/link")) return openLink();
+
   const inSettings = location.hash.startsWith("#/settings");
   setActiveLinks("#mainnav a", "section", inSettings ? "settings" : "guide");
   if (!inSettings) return routeGuide();
 
   show("settings-view");
   const sub = location.hash.startsWith("#/settings/scheduled-tasks") ? "tasks"
-    : location.hash.startsWith("#/settings/account") ? "account" : "library";
+    : location.hash.startsWith("#/settings/account") ? "account"
+    : location.hash.startsWith("#/settings/devices") ? "devices" : "library";
   setActiveLinks(".subnav a", "sub", sub);
   $("#settings-library").hidden = sub !== "library";
   $("#settings-tasks").hidden = sub !== "tasks";
   $("#settings-account").hidden = sub !== "account";
+  $("#settings-devices").hidden = sub !== "devices";
 
   if (sub === "tasks") {
     taskCards.clear();
@@ -110,6 +114,8 @@ async function route() {
     await refreshTasks();
   } else if (sub === "library") {
     await loadLibraryPage();
+  } else if (sub === "devices") {
+    await loadDevices();
   } else {
     $("#password-form").reset();
     setMessage($("#password-form"), null);
@@ -183,6 +189,105 @@ $("#password-form").addEventListener("submit", async (event) => {
     setMessage(form, "error", err.message);
   }
 });
+
+// ---- Linking apps -------------------------------------------------------------
+
+let linkCode = null;
+
+function showLinkStep(step) {
+  $("#link-form").hidden = step !== "form";
+  $("#link-confirm").hidden = step !== "confirm";
+  $("#link-done").hidden = step !== "done";
+}
+
+function showLinkDone(message) {
+  $("#link-result").textContent = message;
+  showLinkStep("done");
+}
+
+async function reviewLink(code) {
+  const pending = await api("GET", `/api/devices/link?code=${encodeURIComponent(code)}`);
+  linkCode = code;
+  $("#link-device").textContent = pending.platform ? `${pending.name} (${pending.platform})` : pending.name;
+  $("#link-code").textContent = code.toUpperCase();
+  $("#link-error").hidden = true;
+  showLinkStep("confirm");
+}
+
+async function openLink() {
+  show("link-view");
+  $("#link-form").reset();
+  setMessage($("#link-form"), null);
+  showLinkStep("form");
+  const code = new URLSearchParams(location.hash.split("?")[1] ?? "").get("code");
+  if (!code) return;
+  $("#link-form").elements.code.value = code;
+  try {
+    await reviewLink(code);
+  } catch (err) {
+    setMessage($("#link-form"), "error", err.message);
+  }
+}
+
+$("#link-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  setMessage(form, null);
+  try {
+    await busy([$("button", form)], () => reviewLink(form.elements.code.value.trim()));
+  } catch (err) {
+    setMessage(form, "error", err.message);
+  }
+});
+
+async function decideLink(action, done) {
+  const buttons = [$("#link-approve"), $("#link-deny")];
+  try {
+    await busy(buttons, () => api("POST", `/api/devices/link/${action}`, { code: linkCode }));
+    showLinkDone(done);
+  } catch (err) {
+    $("#link-error").hidden = false;
+    $("#link-error").textContent = err.message;
+  }
+}
+
+$("#link-approve").addEventListener("click", () => decideLink("approve", "Device linked. You can go back to it now."));
+$("#link-deny").addEventListener("click", () => decideLink("deny", "Cancelled. The device wasn't linked."));
+
+async function loadDevices() {
+  $("#devices-error").hidden = true;
+  const devices = await api("GET", "/api/devices");
+  const list = $("#device-list");
+  list.replaceChildren();
+  $("#devices-empty").hidden = devices.length > 0;
+  for (const device of devices) {
+    const item = document.createElement("li");
+    const text = document.createElement("div");
+    text.textContent = device.name;
+    const detail = document.createElement("small");
+    detail.textContent = [device.platform, `Last used ${formatTime(device.lastSeenAt * 1000)}`].filter(Boolean).join(" · ");
+    text.append(detail);
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "danger link";
+    remove.textContent = "Remove";
+    remove.setAttribute("aria-label", `Remove ${device.name}`);
+    remove.addEventListener("click", async () => {
+      if (!confirm(`Remove ${device.name}? It will have to be linked again.`)) return;
+      try {
+        await api("DELETE", `/api/devices/${device.id}`);
+        await loadDevices();
+      } catch (err) {
+        $("#devices-error").hidden = false;
+        $("#devices-error").textContent = err.message;
+      }
+    });
+
+    item.append(text, remove);
+    list.append(item);
+  }
+}
 
 // ---- Theme ------------------------------------------------------------------
 

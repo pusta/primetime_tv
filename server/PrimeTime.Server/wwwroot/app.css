@@ -353,3 +353,11 @@ input[type="color"].color-input { width: 56px; height: 36px; padding: 2px; }
 .player-info h3 { margin-top: 8px; }
 .player-info-episode { font-weight: 500; }
 .player-info-tagline { font-style: italic; color: var(--muted); }
+
+.devices-hint { margin-top: 4px; }
+.device-list { list-style: none; margin: 8px 0 0; padding: 0; }
+.device-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.device-list li:last-child { border-bottom: 0; }
+.device-list small { display: block; color: var(--muted); }
+#link-view p { margin: 0 0 12px; }
+#link-confirm .actions { margin-top: 4px; }

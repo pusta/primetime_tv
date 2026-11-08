@@ -226,6 +226,30 @@ public sealed class Database
             last_seen_ts INTEGER NOT NULL
         );
         """,
+
+        // 10: Apps linked by QR code.
+        """
+        CREATE TABLE device_links (
+            device_code_hash TEXT PRIMARY KEY,
+            user_code        TEXT NOT NULL UNIQUE,
+            name             TEXT NOT NULL,
+            platform         TEXT,
+            status           TEXT NOT NULL,
+            admin_id         INTEGER REFERENCES admin_users (id) ON DELETE CASCADE,
+            expires_ts       INTEGER NOT NULL,
+            last_poll_ts     INTEGER NOT NULL
+        );
+
+        CREATE TABLE device_tokens (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            admin_id     INTEGER NOT NULL REFERENCES admin_users (id) ON DELETE CASCADE,
+            name         TEXT NOT NULL,
+            platform     TEXT,
+            token_hash   TEXT NOT NULL UNIQUE,
+            created_ts   INTEGER NOT NULL,
+            last_seen_ts INTEGER NOT NULL
+        );
+        """,
     ];
 
     public Database(PrimeTimeOptions options, ILogger<Database> logger)

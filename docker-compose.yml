@@ -12,6 +12,7 @@ services:
     environment:
       TZ: ${TZ:-UTC}
       PRIMETIME_TRUSTED_PROXIES: ${PRIMETIME_TRUSTED_PROXIES:-}
+      PRIMETIME_PUBLIC_URL: ${PRIMETIME_PUBLIC_URL:-}
       Logging__LogLevel__Default: ${PRIMETIME_LOG_LEVEL:-Information}
     volumes:
       # SQLite database and the encryption keys for saved credentials.

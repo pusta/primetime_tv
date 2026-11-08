@@ -195,11 +195,12 @@ public sealed class JellyfinClient(HttpClient http)
     }
 
     /// <summary>
-    /// Asks Jellyfin how to stream an item to a browser. The profile allows only HLS with H.264 and AAC,
+    /// Asks Jellyfin how to stream an item. The profile says what the player can handle,
     /// and Jellyfin decides what to convert and what it can pass along untouched.
     /// </summary>
     public async Task<JellyfinPlaybackInfo> GetPlaybackInfoAsync(
-        string baseUrl, string deviceId, string token, string itemId, string userId, CancellationToken ct)
+        string baseUrl, string deviceId, string token, string itemId, string userId,
+        StreamProfile profile, CancellationToken ct)
     {
         using var request = new HttpRequestMessage(
             HttpMethod.Post, $"{baseUrl}/Items/{Uri.EscapeDataString(itemId)}/PlaybackInfo");
@@ -211,18 +212,18 @@ public sealed class JellyfinClient(HttpClient http)
                 MediaSourceId = itemId,
                 DeviceProfile = new
                 {
-                    MaxStreamingBitrate = 20_000_000,
+                    MaxStreamingBitrate = profile.MaxBitrate,
                     TranscodingProfiles = new[]
                     {
                         new
                         {
                             Container = "ts",
                             Type = "Video",
-                            VideoCodec = "h264",
-                            AudioCodec = "aac",
+                            VideoCodec = profile.VideoCodecs,
+                            AudioCodec = profile.AudioCodecs,
                             Context = "Streaming",
                             Protocol = "hls",
-                            MaxAudioChannels = "2",
+                            MaxAudioChannels = profile.MaxAudioChannels,
                             MinSegments = 1,
                             BreakOnNonKeyFrames = true,
                         },
@@ -237,10 +238,14 @@ public sealed class JellyfinClient(HttpClient http)
 
     /// <summary>Opens a stream file. The caller reads the body and disposes the response.</summary>
     public async Task<HttpResponseMessage> OpenStreamAsync(
-        string baseUrl, string deviceId, string token, string pathAndQuery, CancellationToken ct)
+        string baseUrl, string deviceId, string token, string pathAndQuery, CancellationToken ct, string? range = null)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, baseUrl + pathAndQuery);
         request.Headers.TryAddWithoutValidation("Authorization", AuthHeader(deviceId, token));
+        if (range is not null)
+        {
+            request.Headers.TryAddWithoutValidation("Range", range);
+        }
 
         // Jellyfin holds a segment back until it has been encoded, so give it time.
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);

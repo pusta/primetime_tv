@@ -49,6 +49,16 @@ public sealed record JellyfinMediaItem(
     int? ParentIndexNumber,
     int? IndexNumber);
 
+/// <summary>What a player can decode. Jellyfin only transcodes what falls outside this.</summary>
+public sealed record StreamProfile(string VideoCodecs, string AudioCodecs, string MaxAudioChannels, int MaxBitrate)
+{
+    /// <summary>Browsers and Apple's built-in player.</summary>
+    public static readonly StreamProfile Compatible = new("h264", "aac", "2", 20_000_000);
+
+    /// <summary>mpv decodes nearly anything, so most files can be passed along without transcoding.</summary>
+    public static readonly StreamProfile Mpv = new("h264,hevc", "aac,ac3,eac3,mp3", "8", 120_000_000);
+}
+
 public sealed record JellyfinPerson(string? Name, string? Role, string? Type);
 
 public sealed record JellyfinItemDetails(

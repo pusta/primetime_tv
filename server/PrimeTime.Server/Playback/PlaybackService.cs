@@ -94,7 +94,8 @@ public sealed partial class PlaybackService(
     private const int CastShown = 8;
 
     /// <summary>Returns null if the channel doesn't exist, or a null program if nothing is on air.</summary>
-    public async Task<(Channel? Channel, PlayStart? Start)> StartAsync(long channelId, CancellationToken ct)
+    public async Task<(Channel? Channel, PlayStart? Start)> StartAsync(
+        long channelId, StreamProfile profile, CancellationToken ct)
     {
         await StopIdleAsync(ct);
 
@@ -118,7 +119,7 @@ public sealed partial class PlaybackService(
                      ?? throw new JellyfinException("Jellyfin has no administrator account to play this as.");
 
         var info = await client.GetPlaybackInfoAsync(
-            connection.BaseUrl, deviceId, connection.Token, program.ItemId, userId, ct);
+            connection.BaseUrl, deviceId, connection.Token, program.ItemId, userId, profile, ct);
         var url = info.MediaSources?.FirstOrDefault()?.TranscodingUrl;
         var separator = url?.IndexOf('?') ?? -1;
         var path = separator > 0 ? url![..separator] : "";
