@@ -95,6 +95,19 @@ Automatic to get a color that suits the channel's genre and stands apart from yo
 Channels survive disconnecting and reconnecting the same Jellyfin server. Connecting a different
 server removes them, because its items are different.
 
+## Watching
+
+Select a channel in the Guide, or the program on air, to join it where the schedule says it is now, as
+with live TV. **Start from Beginning** rewinds to the start of the current program and **Back to Live**
+returns to the live position. **Info** shows the description, cast and other details Jellyfin has for
+the program. When a program ends the channel moves on to whatever's airing next.
+Use the pencil next to a channel to edit it.
+
+Jellyfin does all the work on the video. PrimeTime asks it for an HLS stream, and Jellyfin decides what
+to transcode and what to pass along as it is, so PrimeTime never needs FFmpeg or a GPU. The stream does
+pass through PrimeTime on its way to your browser, which keeps your Jellyfin API key on the server and
+means viewers only need to reach PrimeTime. It uses that machine's network bandwidth, not its CPU.
+
 ## Scheduled tasks
 
 *Settings → Scheduled Tasks* controls background jobs: the **Library scan**, every 4 hours by
@@ -227,3 +240,6 @@ Local runs keep their data in `server/PrimeTime.Server/local-data/` (git-ignored
 ## License
 
 [MIT](LICENSE)
+
+The web player includes [hls.js](https://github.com/video-dev/hls.js), under the Apache License 2.0
+(`server/PrimeTime.Server/wwwroot/vendor/hls.js-LICENSE`).

@@ -1,3 +1,5 @@
+using Microsoft.Data.Sqlite;
+
 namespace PrimeTime.Server.Data;
 
 public static class ScheduleItemType
@@ -154,6 +156,25 @@ public sealed class ScheduleStore(Database database)
         return Convert.ToInt64(command.ExecuteScalar()) == 1;
     }
 
+    /// <summary>What a channel is airing at this moment, if anything.</summary>
+    public ScheduleEntry? OnAir(long channelId, long now)
+    {
+        using var connection = database.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT channel_id, item_type, item_id, show_id, season_number, episode_number,
+                   title, subtitle, cycle, start_ts, end_ts
+            FROM schedule_entries
+            WHERE channel_id = $id AND start_ts <= $now AND end_ts > $now
+            LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$id", channelId);
+        command.Parameters.AddWithValue("$now", now);
+
+        using var reader = command.ExecuteReader();
+        return reader.Read() ? ReadEntry(reader) : null;
+    }
+
     public IReadOnlyList<ScheduleEntry> Range(long from, long to)
     {
         using var connection = database.Open();
@@ -172,18 +193,20 @@ public sealed class ScheduleStore(Database database)
         using var reader = command.ExecuteReader();
         while (reader.Read())
         {
-            result.Add(new ScheduleEntry(
-                reader.GetInt64(0), reader.GetString(1), reader.GetString(2),
-                reader.IsDBNull(3) ? null : reader.GetString(3),
-                reader.IsDBNull(4) ? null : reader.GetInt32(4),
-                reader.IsDBNull(5) ? null : reader.GetInt32(5),
-                reader.GetString(6),
-                reader.IsDBNull(7) ? null : reader.GetString(7),
-                reader.GetInt32(8), reader.GetInt64(9), reader.GetInt64(10)));
+            result.Add(ReadEntry(reader));
         }
 
         return result;
     }
+
+    private static ScheduleEntry ReadEntry(SqliteDataReader reader) => new(
+        reader.GetInt64(0), reader.GetString(1), reader.GetString(2),
+        reader.IsDBNull(3) ? null : reader.GetString(3),
+        reader.IsDBNull(4) ? null : reader.GetInt32(4),
+        reader.IsDBNull(5) ? null : reader.GetInt32(5),
+        reader.GetString(6),
+        reader.IsDBNull(7) ? null : reader.GetString(7),
+        reader.GetInt32(8), reader.GetInt64(9), reader.GetInt64(10));
 
     /// <summary>Drops old rows, keeping what channels need to remember their place.</summary>
     public void PruneHistory(long now)

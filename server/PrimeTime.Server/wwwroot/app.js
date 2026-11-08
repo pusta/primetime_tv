@@ -6,7 +6,7 @@
 const $ = (selector, root = document) => root.querySelector(selector);
 
 const views = [
-  "setup-view", "login-view", "wizard-view", "guide-view", "add-channel-view", "channel-editor-view", "settings-view",
+  "setup-view", "login-view", "wizard-view", "guide-view", "add-channel-view", "channel-editor-view", "settings-view", "player-view",
 ];
 const SCAN_TASK = "library-scan";
 const POLL_RUNNING_MS = 1500;
@@ -34,7 +34,7 @@ async function api(method, path, body) {
   if (response.status !== 204) {
     try { data = await response.json(); } catch { data = null; }
   }
-  const signedInOnly = ["/api/jellyfin", "/api/libraries", "/api/tasks", "/api/channels", "/api/catalog", "/api/guide", "/api/account"].some((p) => path.startsWith(p));
+  const signedInOnly = ["/api/jellyfin", "/api/libraries", "/api/tasks", "/api/channels", "/api/catalog", "/api/guide", "/api/account", "/api/play"].some((p) => path.startsWith(p));
   if (response.status === 401 && signedInOnly) {
     await route();
     throw new Error("Your session expired. Sign in again.");
@@ -78,6 +78,7 @@ function cell(text, className) {
 async function route() {
   clearTimeout(pollTimer);
   clearTimeout(guideTimer);
+  if (!location.hash.startsWith("#/watch/")) leavePlayer();
   const session = await api("GET", "/api/session");
   const inApp = session.authenticated && session.setupComplete;
   $("#userbar").hidden = !session.authenticated;
@@ -502,6 +503,11 @@ function currentGuideStart() {
 }
 
 function routeGuide() {
+  const watching = location.hash.match(/^#\/watch\/(\d+)$/);
+  if (watching) {
+    show("player-view");
+    return tune(Number(watching[1]));
+  }
   if (location.hash === "#/guide/add") {
     show("add-channel-view");
     return loadSuggestions();
@@ -577,10 +583,19 @@ function renderGuide(guide) {
     const row = document.createElement("div");
     row.className = "guide-row";
 
+    const cell = document.createElement("div");
+    cell.className = "guide-channel";
     const link = document.createElement("a");
-    link.className = "guide-channel";
-    link.href = `#/guide/channels/${channel.id}`;
-    link.title = `Edit ${channel.name}`;
+    link.className = "guide-watch";
+    link.href = `#/watch/${channel.id}`;
+    link.title = `Watch ${channel.name}`;
+    const edit = document.createElement("a");
+    edit.className = "guide-edit";
+    edit.href = `#/guide/channels/${channel.id}`;
+    edit.title = `Edit ${channel.name}`;
+    edit.setAttribute("aria-label", `Edit ${channel.name}`);
+    edit.textContent = "✎";
+    cell.append(link, edit);
     const number = document.createElement("b");
     number.textContent = channel.number;
     link.append(number);
@@ -604,7 +619,9 @@ function renderGuide(guide) {
       const right = Math.min(trackWidth, guideOffset(program.end));
       const block = document.createElement("div");
       block.className = "guide-program";
-      block.classList.toggle("on-air", program.start <= guide.now && guide.now < program.end);
+      const onAir = program.start <= guide.now && guide.now < program.end;
+      block.classList.toggle("on-air", onAir);
+      if (onAir) block.addEventListener("click", () => { location.hash = `#/watch/${channel.id}`; });
       if (channel.color) block.style.setProperty("--channel", channel.color);
       block.style.left = `${left}px`;
       block.style.width = `${Math.max(0, right - left - 2)}px`;
@@ -624,7 +641,7 @@ function renderGuide(guide) {
       track.append(none);
     }
 
-    row.append(link, track);
+    row.append(cell, track);
     inner.append(row);
   }
 
@@ -645,6 +662,246 @@ function moveGuide(start) {
 $("#guide-earlier").addEventListener("click", () => moveGuide(guideStart - GUIDE_STEP));
 $("#guide-later").addEventListener("click", () => moveGuide(guideStart + GUIDE_STEP));
 $("#guide-now").addEventListener("click", () => moveGuide(currentGuideStart()));
+
+// ---- Player -------------------------------------------------------------------
+
+const playerVideo = $("#player-video");
+const MAX_LEADING_GAP = 10;
+let stream = null; // What's playing now: its ID, player, program and whether it's following the live position.
+let tuneRequest = 0;
+let tuneRetries = 0;
+
+const infoPanel = $("#player-info");
+let infoRequest = 0;
+
+function setInfoOpen(open) {
+  infoPanel.hidden = !open;
+  $("#player-info-toggle").setAttribute("aria-expanded", String(open));
+  if (!open) infoRequest++; // Ignore any answer still on its way.
+}
+
+function infoElement(tag, text, className) {
+  const element = document.createElement(tag);
+  element.textContent = text;
+  if (className) element.className = className;
+  return element;
+}
+
+function runtimeLabel(minutes) {
+  if (minutes < 60) return `${minutes}m`;
+  return minutes % 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${Math.floor(minutes / 60)}h`;
+}
+
+function renderInfo(info) {
+  const episodeNumber = info.season != null && info.episode != null ? `S${info.season}E${info.episode}` : null;
+  // Jellyfin keeps air dates as whole days, so reading them in UTC gives the right day everywhere.
+  const aired = info.airDate
+    ? new Date(info.airDate).toLocaleDateString(undefined, { dateStyle: "medium", timeZone: "UTC" })
+    : null;
+  const meta = [
+    episodeNumber ? aired : info.year,
+    info.officialRating,
+    info.runtimeMinutes ? runtimeLabel(info.runtimeMinutes) : null,
+    info.communityRating ? `★ ${info.communityRating.toFixed(1)}` : null,
+  ].filter(Boolean);
+
+  const parts = [infoElement("h2", info.show ? `${info.show}` : info.title)];
+  if (info.show) parts.push(infoElement("p", [episodeNumber, info.title].filter(Boolean).join(" · "), "player-info-episode"));
+  if (meta.length > 0) parts.push(infoElement("p", meta.join(" · "), "muted"));
+  if (info.tagline) parts.push(infoElement("p", info.tagline, "player-info-tagline"));
+  parts.push(infoElement("p", info.overview || "Jellyfin has no description for this program."));
+  if (info.showOverview) {
+    parts.push(infoElement("h3", "About the show"), infoElement("p", info.showOverview));
+  }
+
+  const facts = document.createElement("dl");
+  facts.className = "facts";
+  const addFact = (label, value) => { if (value) facts.append(infoElement("dt", label), infoElement("dd", value)); };
+  addFact("Genres", info.genres.join(", "));
+  addFact(info.show ? "Network" : "Studio", info.studios.join(", "));
+  addFact(info.directors.length > 1 ? "Directors" : "Director", info.directors.join(", "));
+  addFact("Cast", info.cast.map((c) => (c.role ? `${c.name} (${c.role})` : c.name)).join(", "));
+  if (facts.children.length > 0) parts.push(facts);
+
+  infoPanel.replaceChildren(...parts);
+}
+
+async function loadInfo() {
+  if (!stream) return;
+  const request = ++infoRequest;
+  infoPanel.replaceChildren(infoElement("p", "Loading…", "muted"));
+  try {
+    const info = await api("GET", `/api/play/${stream.playId}/info`);
+    if (request === infoRequest) renderInfo(info);
+  } catch (err) {
+    if (request === infoRequest) infoPanel.replaceChildren(infoElement("p", err.message, "error"));
+  }
+}
+
+$("#player-info-toggle").addEventListener("click", () => {
+  const open = infoPanel.hidden;
+  setInfoOpen(open);
+  if (open) loadInfo();
+});
+
+function showPlayerError(message) {
+  $("#player-error").hidden = !message;
+  $("#player-error").textContent = message ?? "";
+}
+
+function stopStream() {
+  if (!stream) return;
+  clearTimeout(stream.liveTimer);
+  stream.hls?.destroy();
+  playerVideo.removeAttribute("src");
+  playerVideo.load();
+  // Tells Jellyfin to stop encoding. keepalive lets it finish even if the tab is closing.
+  fetch(`/api/play/${stream.playId}`, { method: "DELETE", keepalive: true, credentials: "same-origin" }).catch(() => {});
+  stream = null;
+}
+
+function leavePlayer() {
+  setInfoOpen(false);
+  tuneRequest++;
+  tuneRetries = 0;
+  stopStream();
+}
+
+function serverNow() {
+  return nowSeconds() + stream.clockOffset;
+}
+
+function setLive(live) {
+  stream.live = live;
+  clearTimeout(stream.liveTimer);
+  $("#player-restart").hidden = !live;
+  $("#player-live").hidden = live;
+  if (live) {
+    // On to whatever's next when this program's slot ends, as on real TV.
+    const remaining = stream.program.end - serverNow();
+    stream.liveTimer = setTimeout(() => tune(stream.channelId), (remaining + 1) * 1000);
+  }
+}
+
+function renderNowPlaying(start) {
+  const channel = $("#player-channel");
+  channel.replaceChildren();
+  if (start.channel.logoUrl) {
+    const logo = document.createElement("img");
+    logo.src = start.channel.logoUrl;
+    logo.alt = start.channel.name;
+    channel.append(logo);
+  } else {
+    channel.textContent = `${start.channel.number} ${start.channel.name}`;
+  }
+  $("#player-title").textContent = start.program.title;
+  $("#player-detail").textContent = [start.program.subtitle, `${clockLabel(start.program.start)} – ${clockLabel(start.program.end)}`]
+    .filter(Boolean).join(" · ");
+}
+
+function startVideo() {
+  // Browsers can refuse to start with sound; the player's own controls still work then.
+  playerVideo.play().catch(() => {});
+}
+
+// A stream's first frame can land a moment after zero, and a seek to zero would then wait forever.
+function skipLeadingGap() {
+  if (!playerVideo.seeking) return;
+  for (let i = 0; i < playerVideo.buffered.length; i++) {
+    const start = playerVideo.buffered.start(i);
+    if (start > playerVideo.currentTime && start - playerVideo.currentTime < MAX_LEADING_GAP) {
+      playerVideo.currentTime = start;
+      return;
+    }
+  }
+}
+
+function attachStream(url, offset) {
+  if (window.Hls?.isSupported()) {
+    // The worker is off so the security policy doesn't need to allow scripts from blob: URLs.
+    const hls = new Hls({ enableWorker: false, startPosition: offset });
+    stream.hls = hls;
+    hls.on(Hls.Events.MANIFEST_PARSED, startVideo);
+    hls.on(Hls.Events.FRAG_BUFFERED, skipLeadingGap);
+    hls.on(Hls.Events.ERROR, (_, data) => { if (data.fatal) handleStreamFailure(); });
+    hls.loadSource(url);
+    hls.attachMedia(playerVideo);
+  } else if (playerVideo.canPlayType("application/vnd.apple.mpegurl")) {
+    playerVideo.src = url; // Safari plays HLS itself.
+    playerVideo.addEventListener("loadedmetadata", () => {
+      playerVideo.currentTime = offset;
+      startVideo();
+    }, { once: true });
+  } else {
+    showPlayerError("This browser can't play the stream.");
+  }
+}
+
+function handleStreamFailure() {
+  if (!stream) return;
+  const { channelId } = stream;
+  if (tuneRetries++ < 1) {
+    tune(channelId); // Often just a stream that went idle during a long pause.
+  } else {
+    stopStream();
+    showPlayerError("The stream stopped. Check that Jellyfin is running, then try again.");
+  }
+}
+
+async function tune(channelId) {
+  const request = ++tuneRequest;
+  stopStream();
+  showPlayerError(null);
+  $("#player-restart").hidden = true;
+  $("#player-live").hidden = true;
+
+  let start;
+  try {
+    start = await api("POST", `/api/channels/${channelId}/play`);
+  } catch (err) {
+    if (request === tuneRequest) showPlayerError(err.message);
+    return;
+  }
+  if (request !== tuneRequest) { // Changed channel or left while this was on its way.
+    fetch(`/api/play/${start.playId}`, { method: "DELETE", credentials: "same-origin" }).catch(() => {});
+    return;
+  }
+
+  stream = {
+    channelId,
+    playId: start.playId,
+    program: start.program,
+    clockOffset: start.now - nowSeconds(),
+    hls: null,
+    liveTimer: null,
+    live: true,
+  };
+  renderNowPlaying(start);
+  setLive(true);
+  attachStream(start.url, start.offsetSeconds);
+  if (!infoPanel.hidden) loadInfo(); // Still open from the last program, so show this one.
+}
+
+playerVideo.addEventListener("playing", () => { tuneRetries = 0; });
+playerVideo.addEventListener("ended", () => { if (stream) tune(stream.channelId); });
+playerVideo.addEventListener("error", () => { if (stream && !stream.hls && playerVideo.error) handleStreamFailure(); });
+
+$("#player-restart").addEventListener("click", () => {
+  if (!stream) return;
+  setLive(false);
+  playerVideo.currentTime = 0;
+  startVideo();
+});
+
+$("#player-live").addEventListener("click", () => {
+  if (!stream) return;
+  if (serverNow() >= stream.program.end) return void tune(stream.channelId);
+  playerVideo.currentTime = serverNow() - stream.program.start;
+  setLive(true);
+  startVideo();
+});
+
+window.addEventListener("pagehide", () => stopStream());
 
 // ---- Suggested channels -------------------------------------------------------
 
