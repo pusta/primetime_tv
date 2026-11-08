@@ -22,10 +22,12 @@ function isVisible(viewId) {
 }
 
 async function api(method, path, body) {
+  const isFile = body instanceof Blob;
   const response = await fetch(path, {
     method,
-    headers: body ? { "Content-Type": "application/json" } : {},
-    body: body ? JSON.stringify(body) : undefined,
+    headers: isFile ? { "Content-Type": body.type || "application/octet-stream" }
+      : body ? { "Content-Type": "application/json" } : {},
+    body: isFile ? body : body ? JSON.stringify(body) : undefined,
     credentials: "same-origin",
   });
   let data = null;
@@ -160,6 +162,40 @@ $("#login-form").addEventListener("submit", async (event) => {
   } catch (err) {
     setMessage(form, "error", err.message);
   }
+});
+
+// ---- Theme ------------------------------------------------------------------
+
+const THEME_KEY = "primetime.theme";
+const systemDark = matchMedia("(prefers-color-scheme: dark)");
+
+function savedTheme() {
+  try {
+    const theme = localStorage.getItem(THEME_KEY);
+    return theme === "light" || theme === "dark" ? theme : null;
+  } catch {
+    return null; // Storage can be blocked; the toggle still works until the page reloads.
+  }
+}
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  const label = `Switch to ${theme === "dark" ? "light" : "dark"} mode`;
+  $("#theme-toggle").title = label;
+  $("#theme-toggle").setAttribute("aria-label", label);
+}
+
+applyTheme(document.documentElement.dataset.theme);
+
+// Follow the device until a choice has been made here.
+systemDark.addEventListener("change", (event) => {
+  if (!savedTheme()) applyTheme(event.matches ? "dark" : "light");
+});
+
+$("#theme-toggle").addEventListener("click", () => {
+  const theme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  try { localStorage.setItem(THEME_KEY, theme); } catch { /* Applies to this page load only. */ }
+  applyTheme(theme);
 });
 
 $("#logout").addEventListener("click", async () => {
@@ -528,9 +564,20 @@ function renderGuide(guide) {
     link.title = `Edit ${channel.name}`;
     const number = document.createElement("b");
     number.textContent = channel.number;
-    const name = document.createElement("span");
-    name.textContent = channel.name;
-    link.append(number, name);
+    link.append(number);
+    if (channel.logoUrl) {
+      const logo = document.createElement("div");
+      logo.className = "guide-logo";
+      const image = document.createElement("img");
+      image.src = channel.logoUrl;
+      image.alt = channel.name;
+      logo.append(image);
+      link.append(logo);
+    } else {
+      const name = document.createElement("span");
+      name.textContent = channel.name;
+      link.append(name);
+    }
 
     const track = makeTrack();
     for (const program of channel.programs) {
@@ -539,6 +586,7 @@ function renderGuide(guide) {
       const block = document.createElement("div");
       block.className = "guide-program";
       block.classList.toggle("on-air", program.start <= guide.now && guide.now < program.end);
+      if (channel.color) block.style.setProperty("--channel", channel.color);
       block.style.left = `${left}px`;
       block.style.width = `${Math.max(0, right - left - 2)}px`;
       block.title = [program.title, program.subtitle, `${clockLabel(program.start)} – ${clockLabel(program.end)}`]
@@ -647,6 +695,46 @@ async function loadSuggestions() {
 const TITLES_SHOWN = 200;
 const channelForm = $("#channel-form");
 let airOrderChosen = false;
+const MAX_LOGO_BYTES = 2 * 1024 * 1024;
+const LOGO_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+let automaticColor = null;
+let logoFile = null; // A newly chosen image, not uploaded until the channel is saved.
+let logoRemoved = false;
+let logoObjectUrl = null;
+
+function showLogo(url) {
+  const image = $("#logo-image");
+  image.hidden = !url;
+  if (url) image.src = url; else image.removeAttribute("src");
+  $("#logo-none").hidden = Boolean(url);
+  $("#logo-remove").hidden = !url;
+}
+
+function setLogoPreview(file) {
+  if (logoObjectUrl) URL.revokeObjectURL(logoObjectUrl);
+  logoObjectUrl = file ? URL.createObjectURL(file) : null;
+  showLogo(logoObjectUrl ?? (logoRemoved ? null : editingChannel?.logoUrl ?? null));
+}
+
+$("#logo-choose").addEventListener("click", () => $("#logo-file").click());
+
+$("#logo-file").addEventListener("change", (event) => {
+  const file = event.target.files[0];
+  event.target.value = ""; // So choosing the same file again still fires this.
+  if (!file) return;
+  setMessage(channelForm, null);
+  if (!LOGO_TYPES.includes(file.type)) return setMessage(channelForm, "error", "Logos need to be a PNG, JPEG, WebP or GIF image.");
+  if (file.size > MAX_LOGO_BYTES) return setMessage(channelForm, "error", "Logos can be up to 2 MB.");
+  logoFile = file;
+  logoRemoved = false;
+  setLogoPreview(file);
+});
+
+$("#logo-remove").addEventListener("click", () => {
+  logoFile = null;
+  logoRemoved = true;
+  setLogoPreview(null);
+});
 const catalogs = new Map();
 let editingChannel = null;
 let pickedTitles = new Set();
@@ -676,6 +764,7 @@ function currentChannelBody() {
     studios: mode === "filter" ? checkedIn("#studio-options") : [],
     itemIds: mode === "pick" ? [...pickedTitles] : mode === "collection" ? checkedIn("#collection-options") : [],
     airOrder: data.get("airOrder"),
+    color: data.get("colorMode") === "custom" ? data.get("color") : null,
   };
 }
 
@@ -788,6 +877,17 @@ function schedulePreview() {
   previewTimer = setTimeout(updatePreview, 250);
 }
 
+function syncColorMode() {
+  const custom = new FormData(channelForm).get("colorMode") === "custom";
+  channelForm.elements.color.hidden = !custom;
+  $("#color-auto-swatch").hidden = custom;
+}
+
+function showAutomaticColor(color) {
+  automaticColor = color;
+  $("#color-auto-swatch").style.background = color;
+}
+
 async function updatePreview() {
   const body = currentChannelBody();
   const preview = $("#channel-preview");
@@ -798,8 +898,10 @@ async function updatePreview() {
 
   const request = ++previewRequest;
   try {
-    const result = await api("POST", "/api/channels/preview", body);
+    const query = editingChannel ? `?channelId=${editingChannel.id}` : "";
+    const result = await api("POST", `/api/channels/preview${query}`, body);
     if (request !== previewRequest) return; // A newer preview is on its way.
+    showAutomaticColor(result.automaticColor);
     if (result.count === 0) {
       preview.textContent = "Nothing in your library matches this yet.";
       return;
@@ -816,6 +918,8 @@ async function updatePreview() {
 async function openEditor(channelId) {
   channelForm.reset();
   airOrderChosen = false;
+  logoFile = null;
+  logoRemoved = false;
   setMessage(channelForm, null);
   $("#title-search").value = "";
   catalogs.clear(); // The index may have changed since the last visit.
@@ -825,6 +929,7 @@ async function openEditor(channelId) {
   $("#editor-title").textContent = editingChannel ? `Edit ${editingChannel.name}` : "Build a channel";
   $("#channel-delete").hidden = !editingChannel;
   channelForm.elements.number.placeholder = "Auto";
+  setLogoPreview(null);
 
   if (editingChannel) {
     const fields = channelForm.elements;
@@ -833,12 +938,16 @@ async function openEditor(channelId) {
     fields.contentType.value = editingChannel.contentType;
     fields.mode.value = editingChannel.mode;
     fields.airOrder.value = editingChannel.airOrder;
+    fields.colorMode.value = editingChannel.colorCustom ? "custom" : "auto";
+    fields.color.value = editingChannel.color ?? fields.color.value;
+    showAutomaticColor(editingChannel.color);
     fields.yearFrom.value = editingChannel.yearFrom ?? "";
     fields.yearBefore.value = editingChannel.yearBefore ?? "";
     if (editingChannel.mode === "pick") pickedTitles = new Set(editingChannel.itemIds);
   }
 
   syncEditorMode();
+  syncColorMode();
   await renderContentOptions(
     editingChannel?.genres ?? [],
     editingChannel?.studios ?? [],
@@ -859,6 +968,15 @@ channelForm.addEventListener("change", (event) => {
     return;
   }
   if (name === "airOrder") { airOrderChosen = true; return; }
+  if (name === "color") return;
+  if (name === "colorMode") {
+    // Start from the color the channel would get anyway.
+    if (event.target.value === "custom" && automaticColor && !editingChannel?.colorCustom) {
+      channelForm.elements.color.value = automaticColor;
+    }
+    syncColorMode();
+    return;
+  }
   if (name === "mode") syncEditorMode();
   schedulePreview();
 });
@@ -873,11 +991,17 @@ channelForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   setMessage(channelForm, null);
   const path = editingChannel ? `/api/channels/${editingChannel.id}` : "/api/channels";
+  let saved = null;
   try {
-    await busy([$("#channel-save")], () => api(editingChannel ? "PUT" : "POST", path, currentChannelBody()));
+    await busy([$("#channel-save")], async () => {
+      saved = await api(editingChannel ? "PUT" : "POST", path, currentChannelBody());
+      if (logoFile) await api("PUT", `/api/channels/${saved.id}/logo`, logoFile);
+      else if (logoRemoved && saved.logoUrl) await api("DELETE", `/api/channels/${saved.id}/logo`);
+    });
     location.hash = "#/guide";
   } catch (err) {
-    setMessage(channelForm, "error", err.message);
+    if (saved) editingChannel = saved; // It exists now, so trying again mustn't create another.
+    setMessage(channelForm, "error", saved ? `The channel was saved, but its logo wasn't. ${err.message}` : err.message);
   }
 });
 

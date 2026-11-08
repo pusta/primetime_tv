@@ -86,6 +86,12 @@ channel is rescheduled only if something it was going to play has been removed o
 collections changed. Select a channel's
 name in the Guide to edit it.
 
+Each channel can have a logo, shown in place of its name in the Guide. Add one in the channel builder: a
+PNG, JPEG, WebP or GIF image up to 2 MB.
+
+Programs in the Guide take their channel's color. Choose one in the channel builder, or leave it on
+Automatic to get a color that suits the channel's genre and stands apart from your other channels.
+
 Channels survive disconnecting and reconnecting the same Jellyfin server. Connecting a different
 server removes them, because its items are different.
 

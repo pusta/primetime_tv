@@ -52,7 +52,12 @@ public sealed record ChannelDefinition(
         string.Join(",", ItemIds.Order(StringComparer.Ordinal)));
 }
 
-public sealed record Channel(long Id, int Number, string Name, ChannelDefinition Definition);
+public sealed record Channel(
+    long Id, int Number, string Name, ChannelDefinition Definition, long? LogoVersion, string? Color, bool ColorCustom)
+{
+    /// <summary>Changes whenever the image does, so browsers can cache each version for good.</summary>
+    public string? LogoUrl => LogoVersion is { } version ? $"/api/channels/{Id}/logo?v={version}" : null;
+}
 
 /// <summary>Tests catalog titles against a channel's definition.</summary>
 public sealed class ChannelMatcher(ChannelDefinition definition)

@@ -201,6 +201,22 @@ public sealed class Database
         ALTER TABLE channels ADD COLUMN air_order TEXT NOT NULL DEFAULT 'random';
         UPDATE channels SET air_order = 'oldest' WHERE content_type = 'shows';
         """,
+
+        // 7: Channel logos.
+        """
+        CREATE TABLE channel_logos (
+            channel_id   INTEGER PRIMARY KEY REFERENCES channels (id) ON DELETE CASCADE,
+            content_type TEXT NOT NULL,
+            data         BLOB NOT NULL,
+            updated_at   INTEGER NOT NULL
+        );
+        """,
+
+        // 8: Guide colors. A channel without a custom color gets one chosen from its content.
+        """
+        ALTER TABLE channels ADD COLUMN color TEXT;
+        ALTER TABLE channels ADD COLUMN color_custom INTEGER NOT NULL DEFAULT 0;
+        """,
     ];
 
     public Database(PrimeTimeOptions options, ILogger<Database> logger)

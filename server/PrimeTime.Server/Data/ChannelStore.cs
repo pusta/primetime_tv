@@ -38,7 +38,9 @@ public sealed class ChannelStore(Database database)
         using (var command = connection.CreateCommand())
         {
             command.CommandText = """
-                SELECT id, number, name, content_type, mode, year_from, year_before, genres, studios, air_order
+                SELECT id, number, name, content_type, mode, year_from, year_before, genres, studios, air_order,
+                       (SELECT updated_at FROM channel_logos l WHERE l.channel_id = channels.id),
+                       color, color_custom
                 FROM channels ORDER BY number;
                 """;
             using var reader = command.ExecuteReader();
@@ -53,7 +55,10 @@ public sealed class ChannelStore(Database database)
                     JsonSerializer.Deserialize<List<string>>(reader.GetString(7)) ?? [],
                     JsonSerializer.Deserialize<List<string>>(reader.GetString(8)) ?? [],
                     picks.GetValueOrDefault(id) ?? [],
-                    reader.GetString(9))));
+                    reader.GetString(9)),
+                    reader.IsDBNull(10) ? null : reader.GetInt64(10),
+                    reader.IsDBNull(11) ? null : reader.GetString(11),
+                    reader.GetInt64(12) == 1));
             }
         }
 
@@ -80,7 +85,7 @@ public sealed class ChannelStore(Database database)
         return Convert.ToInt64(command.ExecuteScalar()) == 1;
     }
 
-    public long Save(long? id, int number, string name, ChannelDefinition definition)
+    public long Save(long? id, int number, string name, ChannelDefinition definition, string color, bool colorCustom)
     {
         var now = DateTimeOffset.UtcNow.ToString("O");
         using var connection = database.Open();
@@ -94,14 +99,15 @@ public sealed class ChannelStore(Database database)
                 ? """
                   INSERT INTO channels
                       (number, name, content_type, mode, year_from, year_before, genres, studios, air_order,
-                       created_at, updated_at)
-                  VALUES ($number, $name, $type, $mode, $from, $before, $genres, $studios, $airOrder, $now, $now)
+                       color, color_custom, created_at, updated_at)
+                  VALUES ($number, $name, $type, $mode, $from, $before, $genres, $studios, $airOrder,
+                          $color, $colorCustom, $now, $now)
                   RETURNING id;
                   """
                 : """
                   UPDATE channels SET number = $number, name = $name, content_type = $type, mode = $mode,
                       year_from = $from, year_before = $before, genres = $genres, studios = $studios,
-                      air_order = $airOrder, updated_at = $now
+                      air_order = $airOrder, color = $color, color_custom = $colorCustom, updated_at = $now
                   WHERE id = $id
                   RETURNING id;
                   """;
@@ -115,6 +121,8 @@ public sealed class ChannelStore(Database database)
             command.Parameters.AddWithValue("$genres", JsonSerializer.Serialize(definition.Genres));
             command.Parameters.AddWithValue("$studios", JsonSerializer.Serialize(definition.Studios));
             command.Parameters.AddWithValue("$airOrder", definition.AirOrder);
+            command.Parameters.AddWithValue("$color", color);
+            command.Parameters.AddWithValue("$colorCustom", colorCustom ? 1 : 0);
             command.Parameters.AddWithValue("$now", now);
             channelId = Convert.ToInt64(command.ExecuteScalar());
         }
@@ -139,6 +147,16 @@ public sealed class ChannelStore(Database database)
 
         tx.Commit();
         return channelId;
+    }
+
+    public void SetColor(long id, string color)
+    {
+        using var connection = database.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE channels SET color = $color WHERE id = $id;";
+        command.Parameters.AddWithValue("$id", id);
+        command.Parameters.AddWithValue("$color", color);
+        command.ExecuteNonQuery();
     }
 
     public bool Delete(long id)

@@ -45,6 +45,8 @@ builder.Services.AddScoped<LibraryService>();
 builder.Services.AddSingleton<CollectionStore>();
 builder.Services.AddSingleton<CatalogStore>();
 builder.Services.AddSingleton<ChannelStore>();
+builder.Services.AddSingleton<ChannelLogoStore>();
+builder.Services.AddSingleton<ChannelColors>();
 builder.Services.AddSingleton<ScheduleStore>();
 builder.Services.AddSingleton<ScheduleService>();
 
@@ -89,6 +91,7 @@ builder.Services.AddRateLimiter(limiter =>
 var app = builder.Build();
 
 app.Services.GetRequiredService<Database>().Migrate();
+app.Services.GetRequiredService<ChannelColors>().FillMissing();
 app.Services.GetRequiredService<TaskRunner>().Initialize();
 
 app.UseDefaultFiles();

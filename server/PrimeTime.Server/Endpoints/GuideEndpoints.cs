@@ -25,6 +25,8 @@ public static class GuideEndpoints
                     channel.Id,
                     channel.Number,
                     channel.Name,
+                    channel.LogoUrl,
+                    channel.Color,
                     programs = byChannel[channel.Id].Select(e => new
                     {
                         type = e.ItemType,
