@@ -137,6 +137,7 @@ Set these in `.env` (see [.env.example](.env.example)):
 | `PRIMETIME_HTTP_PORT` | `8080`        | Port on your machine for the web UI and API         |
 | `TZ`                  | `UTC`         | Time zone for logs (and, later, channel schedules)  |
 | `PRIMETIME_LOG_LEVEL` | `Information` | `Trace`, `Debug`, `Information`, `Warning`, `Error` |
+| `PRIMETIME_TRUSTED_PROXIES` | *(empty)* | IP addresses or CIDR ranges of reverse proxies to trust |
 
 Everything else (admin account, Jellyfin connection) is set in the web UI and stored in the
 `primetime-data` Docker volume.
@@ -147,7 +148,7 @@ Everything else (admin account, Jellyfin connection) is set in the web UI and st
 and `503` when the database isn't:
 
 ```json
-{ "status": "healthy", "version": "0.1.0", "checks": { "database": "ok" } }
+{ "status": "healthy", "checks": { "database": "ok" } }
 ```
 
 The container's Docker `HEALTHCHECK` calls it too.
@@ -162,11 +163,19 @@ The container's Docker `HEALTHCHECK` calls it too.
   header, never in URLs, and PrimeTime doesn't log request bodies or headers.
 - The encryption keys live in the same data volume (`/data/keys`). That protects against a leaked
   database file or backup of just the database, not against someone who has the whole volume.
-  Treat the volume like a secret.
-- Sign-in uses an HTTP-only, `SameSite=Strict` cookie. The login and setup endpoints are
-  rate-limited to 10 attempts per minute per IP address.
+  Treat the volume, and any backup of it, like a secret.
+- **Create the admin account straight away.** Until it exists, anyone who can reach the port can
+  create it. Docker publishes the port on every network interface, so keep PrimeTime off untrusted
+  networks until setup is done.
+- Sign-in uses an HTTP-only, `SameSite=Strict` cookie tied to a session on the server, so signing
+  out ends it even if someone copied the cookie. Changing your password under *Settings → Account*
+  signs out your other devices. The login, setup and password endpoints are rate-limited to 10
+  attempts per minute per IP address.
 - PrimeTime serves plain HTTP. If you expose it beyond your home network, put it behind a reverse
-  proxy that adds HTTPS.
+  proxy that adds HTTPS, and set `PRIMETIME_TRUSTED_PROXIES` to the proxy's IP address or CIDR range
+  (comma-separated if there are several). Without it PrimeTime ignores the proxy's `X-Forwarded-*`
+  headers, so the sign-in cookie isn't marked `Secure` and everyone shares one login rate limit.
+  Only list addresses you control: a listed address can claim to be any client.
 
 ## Project layout
 

@@ -99,7 +99,6 @@ public static partial class ChannelEndpoints
 
             // The URL changes with the image, so a cached copy never goes stale.
             response.Headers.CacheControl = "private, max-age=31536000, immutable";
-            response.Headers.XContentTypeOptions = "nosniff";
             return Results.File(logo.Data, logo.ContentType);
         });
 

@@ -7,6 +7,8 @@ namespace PrimeTime.Server.Endpoints;
 
 public sealed record CredentialsRequest(string? Username, string? Password);
 
+public sealed record PasswordChangeRequest(string? CurrentPassword, string? NewPassword);
+
 public static class AuthEndpoints
 {
     private const int MinPasswordLength = 8;
@@ -25,7 +27,7 @@ public static class AuthEndpoints
         }));
 
         // Creates the first admin account. Only works while no admin exists.
-        api.MapPost("/setup", async (CredentialsRequest body, HttpContext http, AdminUserStore users) =>
+        api.MapPost("/setup", async (CredentialsRequest body, HttpContext http, AdminUserStore users, SessionStore sessions) =>
         {
             var username = body.Username?.Trim() ?? "";
             var password = body.Password ?? "";
@@ -46,11 +48,11 @@ public static class AuthEndpoints
                     statusCode: StatusCodes.Status409Conflict);
             }
 
-            await SignInAsync(http, admin);
+            await SignInAsync(http, admin, sessions);
             return Results.Ok(new { username = admin.Username });
         }).RequireRateLimiting("auth");
 
-        api.MapPost("/login", async (CredentialsRequest body, HttpContext http, AdminUserStore users) =>
+        api.MapPost("/login", async (CredentialsRequest body, HttpContext http, AdminUserStore users, SessionStore sessions) =>
         {
             var admin = users.VerifyCredentials(body.Username?.Trim() ?? "", body.Password ?? "");
             if (admin is null)
@@ -59,24 +61,50 @@ public static class AuthEndpoints
                     statusCode: StatusCodes.Status401Unauthorized);
             }
 
-            await SignInAsync(http, admin);
+            await SignInAsync(http, admin, sessions);
             return Results.Ok(new { username = admin.Username });
         }).RequireRateLimiting("auth");
 
-        api.MapPost("/logout", async (HttpContext http) =>
+        api.MapPost("/logout", async (HttpContext http, SessionStore sessions) =>
         {
+            if (http.User.FindFirstValue(SessionStore.ClaimType) is { } session)
+            {
+                sessions.Delete(session);
+            }
+
             await http.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
             return Results.NoContent();
         });
+
+        // Changing the password signs out every other device.
+        api.MapPost("/account/password", (
+            PasswordChangeRequest body, HttpContext http, AdminUserStore users, SessionStore sessions) =>
+        {
+            var newPassword = body.NewPassword ?? "";
+            if (newPassword.Length < MinPasswordLength)
+            {
+                return Error($"Use a password of at least {MinPasswordLength} characters.");
+            }
+
+            var adminId = long.Parse(http.User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+            if (!users.ChangePassword(adminId, body.CurrentPassword ?? "", newPassword))
+            {
+                return Error("Your current password isn't right.");
+            }
+
+            sessions.DeleteOthers(adminId, http.User.FindFirstValue(SessionStore.ClaimType)!);
+            return Results.NoContent();
+        }).RequireAuthorization().RequireRateLimiting("auth");
     }
 
-    private static Task SignInAsync(HttpContext http, AdminUser admin)
+    private static Task SignInAsync(HttpContext http, AdminUser admin, SessionStore sessions)
     {
         var identity = new ClaimsIdentity(
             [
                 new Claim(ClaimTypes.NameIdentifier, admin.Id.ToString()),
                 new Claim(ClaimTypes.Name, admin.Username),
                 new Claim(ClaimTypes.Role, "admin"),
+                new Claim(SessionStore.ClaimType, sessions.Create(admin.Id)),
             ],
             CookieAuthenticationDefaults.AuthenticationScheme);
         return http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(identity));
