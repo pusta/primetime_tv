@@ -428,4 +428,4 @@ FodyWeavers.xsd
 #*.lscache
 
 # PrimeTime local data (SQLite database, Data Protection keys)
-data/
+/server/PrimeTime.Server/local-data/

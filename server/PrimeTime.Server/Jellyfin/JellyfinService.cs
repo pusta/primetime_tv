@@ -1,4 +1,6 @@
 using PrimeTime.Server.Data;
+using PrimeTime.Server.Library;
+using PrimeTime.Server.Tasks;
 
 namespace PrimeTime.Server.Jellyfin;
 
@@ -17,6 +19,9 @@ public sealed class JellyfinService(
     JellyfinClient client,
     JellyfinConnectionStore store,
     SettingsStore settings,
+    LibraryStore libraries,
+    ScheduledTaskStore scheduledTasks,
+    TaskRunner runner,
     ILogger<JellyfinService> logger)
 {
     /// <summary>Connects with the given details and reports what it found, without saving anything.</summary>
@@ -35,7 +40,7 @@ public sealed class JellyfinService(
     public async Task<JellyfinConnectResult> SaveAsync(JellyfinConnectRequest request, CancellationToken ct)
     {
         var attempt = await ConnectAsync(request, ct);
-        store.Save(new SavedJellyfinConnection(
+        var connection = new SavedJellyfinConnection(
             BaseUrl: attempt.BaseUrl,
             AuthMethod: attempt.AuthMethod,
             Username: attempt.Username,
@@ -44,7 +49,23 @@ public sealed class JellyfinService(
             ServerId: attempt.Result.Server.Id,
             ServerName: attempt.Result.Server.Name,
             ServerVersion: attempt.Result.Server.Version,
-            UpdatedAt: DateTimeOffset.UtcNow));
+            UpdatedAt: DateTimeOffset.UtcNow);
+
+        var previous = store.Get();
+        if (previous is not null && previous.ServerId != connection.ServerId)
+        {
+            // A different server has different items, so the old selection and index mean nothing.
+            await runner.RunExclusiveAsync(() =>
+            {
+                store.Save(connection);
+                ForgetLibraries();
+            });
+            logger.LogInformation("Jellyfin server changed; cleared the library selection and index");
+        }
+        else
+        {
+            store.Save(connection);
+        }
 
         logger.LogInformation("Saved Jellyfin connection to {ServerName} ({Version}) using {AuthMethod}",
             attempt.Result.Server.Name, attempt.Result.Server.Version, attempt.AuthMethod);
@@ -80,8 +101,18 @@ public sealed class JellyfinService(
             await client.LogoutAsync(saved.BaseUrl, settings.GetOrCreateDeviceId(), saved.Token, ct);
         }
 
-        store.Delete();
+        await runner.RunExclusiveAsync(() =>
+        {
+            store.Delete();
+            ForgetLibraries();
+        });
         logger.LogInformation("Removed the saved Jellyfin connection");
+    }
+
+    private void ForgetLibraries()
+    {
+        libraries.Reset();
+        scheduledTasks.SetNextRun(LibraryScanTask.TaskKey, null);
     }
 
     private async Task<ConnectAttempt> ConnectAsync(JellyfinConnectRequest request, CancellationToken ct)

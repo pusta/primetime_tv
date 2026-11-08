@@ -10,6 +10,10 @@
 <body>
   <header class="topbar">
     <span class="brand">PrimeTime</span>
+    <nav class="mainnav" id="mainnav" aria-label="Main" hidden>
+      <a href="#/" data-section="library">Library</a>
+      <a href="#/settings/scheduled-tasks" data-section="settings">Settings</a>
+    </nav>
     <span class="topbar-right" id="userbar" hidden>
       <span id="current-user"></span>
       <button type="button" class="link" id="logout">Sign out</button>
@@ -102,13 +106,101 @@
           <h2>Libraries</h2>
           <span class="muted" id="libraries-note"></span>
         </div>
-        <table class="libraries">
-          <thead><tr><th>Name</th><th>Type</th><th>Folders</th></tr></thead>
-          <tbody id="libraries-body"></tbody>
-        </table>
-        <p class="muted" id="libraries-empty" hidden>This server has no libraries yet.</p>
+
+        <!-- Choose which libraries to index -->
+        <form id="library-form" hidden>
+          <p class="muted picker-intro">Choose the Jellyfin libraries PrimeTime can build channels from.
+            It will scan them as soon as you confirm.</p>
+          <ul class="checklist" id="library-options"></ul>
+          <p class="error" role="alert" hidden></p>
+          <div class="actions">
+            <button type="submit">Confirm and scan</button>
+            <button type="button" class="secondary" id="library-cancel" hidden>Cancel</button>
+          </div>
+        </form>
+
+        <!-- What's indexed so far -->
+        <div id="library-index" hidden>
+          <p class="scan-status" id="scan-status" role="status"></p>
+          <p class="error" id="scan-error" role="alert" hidden></p>
+          <div class="table-scroll">
+            <table class="libraries">
+              <thead>
+                <tr><th>Name</th><th>Type</th><th class="num">Movies</th><th class="num">Shows</th><th class="num">Episodes</th><th>Last scanned</th></tr>
+              </thead>
+              <tbody id="libraries-body"></tbody>
+            </table>
+          </div>
+          <p class="muted" id="libraries-excluded" hidden></p>
+          <div class="actions">
+            <button type="button" id="scan-now">Scan now</button>
+            <button type="button" class="secondary" id="scan-cancel" hidden>Stop scan</button>
+            <button type="button" class="secondary" id="library-change">Change libraries</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Settings -->
+    <section id="settings-view" hidden>
+      <h1>Settings</h1>
+      <div class="settings">
+        <nav class="subnav" aria-label="Settings">
+          <a href="#/settings/scheduled-tasks" class="active" aria-current="page">Scheduled Tasks</a>
+        </nav>
+        <div class="settings-content">
+          <h2 class="section-title">Scheduled Tasks</h2>
+          <div id="tasks-list"></div>
+        </div>
       </div>
     </section>
   </main>
+
+  <template id="task-template">
+    <article class="card">
+      <div class="card-head">
+        <h3 data-field="name"></h3>
+        <span class="badge" data-field="state"></span>
+      </div>
+      <p class="muted task-description" data-field="description"></p>
+
+      <dl class="facts">
+        <dt>Next run</dt><dd data-field="next"></dd>
+        <dt>Last run</dt><dd data-field="last"></dd>
+      </dl>
+      <p class="scan-status" data-field="progress" role="status" hidden></p>
+
+      <form class="task-form">
+        <label class="check"><input type="checkbox" name="enabled"> Run automatically</label>
+        <div class="interval">
+          <label>Run every <input type="number" name="every" min="1" step="1" required></label>
+          <label>Unit
+            <select name="unit">
+              <option value="1">Minutes</option>
+              <option value="60">Hours</option>
+              <option value="1440">Days</option>
+            </select>
+          </label>
+        </div>
+        <p class="hint">Between 15 minutes and 30 days.</p>
+        <p class="error" role="alert" hidden></p>
+        <p class="success" role="status" hidden></p>
+        <div class="actions">
+          <button type="submit">Save schedule</button>
+          <button type="button" class="secondary" data-action="run">Run now</button>
+          <button type="button" class="secondary" data-action="cancel" hidden>Stop</button>
+        </div>
+      </form>
+
+      <h4>Recent runs</h4>
+      <div class="table-scroll">
+        <table class="libraries runs">
+          <thead><tr><th>Started</th><th>Trigger</th><th>Result</th><th>Details</th></tr></thead>
+          <tbody data-field="runs"></tbody>
+        </table>
+      </div>
+      <p class="muted" data-field="no-runs" hidden>This task hasn't run yet.</p>
+    </article>
+  </template>
 </body>
 </html>

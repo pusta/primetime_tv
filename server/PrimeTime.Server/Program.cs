@@ -6,6 +6,8 @@ using PrimeTime.Server;
 using PrimeTime.Server.Data;
 using PrimeTime.Server.Endpoints;
 using PrimeTime.Server.Jellyfin;
+using PrimeTime.Server.Library;
+using PrimeTime.Server.Tasks;
 
 // `PrimeTime.Server healthcheck` is used by the Docker HEALTHCHECK so the
 // runtime image doesn't need curl or wget.
@@ -30,8 +32,18 @@ builder.Services.AddSingleton<Database>();
 builder.Services.AddSingleton<AdminUserStore>();
 builder.Services.AddSingleton<SettingsStore>();
 builder.Services.AddSingleton<JellyfinConnectionStore>();
-builder.Services.AddHttpClient<JellyfinClient>(client => client.Timeout = TimeSpan.FromSeconds(15));
+// JellyfinClient applies its own per-request timeouts.
+builder.Services.AddHttpClient<JellyfinClient>(client => client.Timeout = Timeout.InfiniteTimeSpan);
 builder.Services.AddScoped<JellyfinService>();
+
+builder.Services.AddSingleton<LibraryStore>();
+builder.Services.AddSingleton<MediaIndexStore>();
+builder.Services.AddSingleton<ScheduledTaskStore>();
+builder.Services.AddScoped<LibraryService>();
+
+builder.Services.AddSingleton<IScheduledTask, LibraryScanTask>();
+builder.Services.AddSingleton<TaskRunner>();
+builder.Services.AddHostedService<TaskSchedulerService>();
 
 builder.Services
     .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
@@ -69,6 +81,7 @@ builder.Services.AddRateLimiter(limiter =>
 var app = builder.Build();
 
 app.Services.GetRequiredService<Database>().Migrate();
+app.Services.GetRequiredService<TaskRunner>().Initialize();
 
 app.UseDefaultFiles();
 app.UseStaticFiles();
@@ -79,6 +92,8 @@ app.UseAuthorization();
 app.MapHealthEndpoints();
 app.MapAuthEndpoints();
 app.MapJellyfinEndpoints();
+app.MapLibraryEndpoints();
+app.MapTaskEndpoints();
 
 app.Logger.LogInformation("PrimeTime {Version} starting, data directory {DataDir}",
     AppInfo.Version, options.DataDir);

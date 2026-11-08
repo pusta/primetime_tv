@@ -1,6 +1,6 @@
 **/bin/
 **/obj/
-**/data/
+**/local-data/
 .git/
 .vs/
 .vscode/

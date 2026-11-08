@@ -1,0 +1,200 @@
+using Microsoft.Data.Sqlite;
+
+namespace PrimeTime.Server.Data;
+
+/// <summary>
+/// Opens connections to the SQLite database and applies schema migrations.
+/// Migrations are numbered SQL scripts tracked with PRAGMA user_version.
+/// </summary>
+public sealed class Database
+{
+    private readonly string _connectionString;
+    private readonly ILogger<Database> _logger;
+
+    private static readonly string[] Migrations =
+    [
+        // 1: admin accounts, key/value settings, the Jellyfin connection.
+        """
+        CREATE TABLE admin_users (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
+            password_hash TEXT NOT NULL,
+            created_at    TEXT NOT NULL
+        );
+
+        CREATE TABLE settings (
+            key        TEXT PRIMARY KEY,
+            value      TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE jellyfin_connection (
+            id              INTEGER PRIMARY KEY CHECK (id = 1),
+            base_url        TEXT NOT NULL,
+            auth_method     TEXT NOT NULL,
+            username        TEXT,
+            user_id         TEXT,
+            token_protected TEXT NOT NULL,
+            server_id       TEXT,
+            server_name     TEXT,
+            server_version  TEXT,
+            updated_at      TEXT NOT NULL
+        );
+        """,
+
+        // 2: selected libraries, the media index, and scheduled tasks.
+        """
+        CREATE TABLE libraries (
+            id              TEXT PRIMARY KEY,
+            name            TEXT NOT NULL,
+            collection_type TEXT NOT NULL,
+            locations       TEXT NOT NULL DEFAULT '[]',
+            selected        INTEGER NOT NULL DEFAULT 0,
+            last_scanned_at TEXT,
+            last_scan_error TEXT
+        );
+
+        CREATE TABLE movies (
+            id                TEXT PRIMARY KEY,
+            library_id        TEXT NOT NULL REFERENCES libraries (id) ON DELETE CASCADE,
+            title             TEXT NOT NULL,
+            sort_title        TEXT,
+            year              INTEGER,
+            overview          TEXT,
+            runtime_seconds   INTEGER,
+            genres            TEXT NOT NULL DEFAULT '[]',
+            studios           TEXT NOT NULL DEFAULT '[]',
+            tags              TEXT NOT NULL DEFAULT '[]',
+            official_rating   TEXT,
+            community_rating  REAL,
+            premiere_date     TEXT,
+            date_added        TEXT,
+            provider_ids      TEXT NOT NULL DEFAULT '{}',
+            first_seen_run_id INTEGER NOT NULL,
+            last_seen_run_id  INTEGER NOT NULL
+        );
+        CREATE INDEX ix_movies_library ON movies (library_id);
+
+        CREATE TABLE shows (
+            id                TEXT PRIMARY KEY,
+            library_id        TEXT NOT NULL REFERENCES libraries (id) ON DELETE CASCADE,
+            title             TEXT NOT NULL,
+            sort_title        TEXT,
+            year              INTEGER,
+            overview          TEXT,
+            status            TEXT,
+            genres            TEXT NOT NULL DEFAULT '[]',
+            studios           TEXT NOT NULL DEFAULT '[]',
+            tags              TEXT NOT NULL DEFAULT '[]',
+            official_rating   TEXT,
+            community_rating  REAL,
+            premiere_date     TEXT,
+            date_added        TEXT,
+            provider_ids      TEXT NOT NULL DEFAULT '{}',
+            first_seen_run_id INTEGER NOT NULL,
+            last_seen_run_id  INTEGER NOT NULL
+        );
+        CREATE INDEX ix_shows_library ON shows (library_id);
+
+        CREATE TABLE episodes (
+            id                TEXT PRIMARY KEY,
+            show_id           TEXT NOT NULL REFERENCES shows (id) ON DELETE CASCADE,
+            library_id        TEXT NOT NULL REFERENCES libraries (id) ON DELETE CASCADE,
+            season_number     INTEGER,
+            episode_number    INTEGER,
+            title             TEXT NOT NULL,
+            overview          TEXT,
+            runtime_seconds   INTEGER,
+            premiere_date     TEXT,
+            date_added        TEXT,
+            provider_ids      TEXT NOT NULL DEFAULT '{}',
+            first_seen_run_id INTEGER NOT NULL,
+            last_seen_run_id  INTEGER NOT NULL
+        );
+        CREATE INDEX ix_episodes_library ON episodes (library_id);
+        CREATE INDEX ix_episodes_order ON episodes (show_id, season_number, episode_number);
+
+        CREATE TABLE scheduled_tasks (
+            key              TEXT PRIMARY KEY,
+            enabled          INTEGER NOT NULL DEFAULT 1,
+            interval_minutes INTEGER NOT NULL,
+            next_run_at      TEXT
+        );
+
+        CREATE TABLE task_runs (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_key    TEXT NOT NULL,
+            trigger     TEXT NOT NULL,
+            status      TEXT NOT NULL,
+            started_at  TEXT NOT NULL,
+            finished_at TEXT,
+            summary     TEXT,
+            error       TEXT
+        );
+        CREATE INDEX ix_task_runs_key ON task_runs (task_key, id);
+        """,
+    ];
+
+    public Database(PrimeTimeOptions options, ILogger<Database> logger)
+    {
+        _logger = logger;
+        _connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = options.DatabasePath,
+            Mode = SqliteOpenMode.ReadWriteCreate,
+            ForeignKeys = true,
+        }.ToString();
+    }
+
+    public SqliteConnection Open()
+    {
+        var connection = new SqliteConnection(_connectionString);
+        connection.Open();
+        return connection;
+    }
+
+    public void Migrate()
+    {
+        using var connection = Open();
+        Execute(connection, "PRAGMA journal_mode = WAL;");
+
+        var current = Convert.ToInt32(Scalar(connection, "PRAGMA user_version;"));
+        for (var version = current; version < Migrations.Length; version++)
+        {
+            using var tx = connection.BeginTransaction();
+            Execute(connection, Migrations[version], tx);
+            Execute(connection, $"PRAGMA user_version = {version + 1};", tx);
+            tx.Commit();
+            _logger.LogInformation("Applied database migration {Version}", version + 1);
+        }
+    }
+
+    public bool IsHealthy()
+    {
+        try
+        {
+            using var connection = Open();
+            return Convert.ToInt32(Scalar(connection, "SELECT 1;")) == 1;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Database health check failed");
+            return false;
+        }
+    }
+
+    private static void Execute(SqliteConnection connection, string sql, SqliteTransaction? tx = null)
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = tx;
+        command.CommandText = sql;
+        command.ExecuteNonQuery();
+    }
+
+    private static object? Scalar(SqliteConnection connection, string sql)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        return command.ExecuteScalar();
+    }
+}

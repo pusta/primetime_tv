@@ -24,6 +24,31 @@ public sealed record JellyfinItemsResult(List<JellyfinBaseItem>? Items);
 
 public sealed record JellyfinBaseItem(string? Id, string? Name, string? CollectionType);
 
+public sealed record JellyfinMediaPage(List<JellyfinMediaItem>? Items, int? TotalRecordCount);
+
+public sealed record JellyfinNamedItem(string? Name);
+
+/// <summary>One movie, series or episode from GET /Items.</summary>
+public sealed record JellyfinMediaItem(
+    string? Id,
+    string? Name,
+    string? SortName,
+    int? ProductionYear,
+    string? Overview,
+    long? RunTimeTicks,
+    List<string>? Genres,
+    List<JellyfinNamedItem>? Studios,
+    List<string>? Tags,
+    string? OfficialRating,
+    double? CommunityRating,
+    string? PremiereDate,
+    string? DateCreated,
+    Dictionary<string, string?>? ProviderIds,
+    string? Status,
+    string? SeriesId,
+    int? ParentIndexNumber,
+    int? IndexNumber);
+
 // What PrimeTime returns to its own UI.
 
 public sealed record ServerSummary(string Url, string? Name, string? Version, string? Id);
