@@ -1,11 +1,11 @@
 "use strict";
 
-// Management UI: first-run setup, sign-in, the Jellyfin connection, library
-// selection and index status, and Settings → Scheduled Tasks.
+// Management UI: admin creation, sign-in, the one-time setup wizard, the Guide,
+// and Settings (Library and Scheduled Tasks).
 
 const $ = (selector, root = document) => root.querySelector(selector);
 
-const views = ["setup-view", "login-view", "dashboard-view", "settings-view"];
+const views = ["setup-view", "login-view", "wizard-view", "guide-view", "settings-view"];
 const SCAN_TASK = "library-scan";
 const POLL_RUNNING_MS = 1500;
 const POLL_IDLE_MS = 30000;
@@ -72,30 +72,59 @@ function cell(text, className) {
 // ---- Routing --------------------------------------------------------------
 
 async function route() {
+  clearTimeout(pollTimer);
   const session = await api("GET", "/api/session");
+  const inApp = session.authenticated && session.setupComplete;
   $("#userbar").hidden = !session.authenticated;
-  $("#mainnav").hidden = !session.authenticated;
+  $("#mainnav").hidden = !inApp;
   $("#current-user").textContent = session.username ?? "";
 
   if (session.needsSetup) return show("setup-view");
   if (!session.authenticated) return show("login-view");
-
-  const inSettings = location.hash.startsWith("#/settings");
-  for (const link of document.querySelectorAll("#mainnav a")) {
-    const active = link.dataset.section === (inSettings ? "settings" : "library");
-    link.classList.toggle("active", active);
-    if (active) link.setAttribute("aria-current", "page"); else link.removeAttribute("aria-current");
+  if (!session.setupComplete) {
+    show("wizard-view");
+    return loadWizard();
   }
 
-  if (inSettings) {
-    show("settings-view");
+  const inSettings = location.hash.startsWith("#/settings");
+  setActiveLinks("#mainnav a", "section", inSettings ? "settings" : "guide");
+  if (!inSettings) return show("guide-view");
+
+  show("settings-view");
+  const onTasks = location.hash.startsWith("#/settings/scheduled-tasks");
+  setActiveLinks(".subnav a", "sub", onTasks ? "tasks" : "library");
+  $("#settings-library").hidden = onTasks;
+  $("#settings-tasks").hidden = !onTasks;
+
+  if (onTasks) {
     taskCards.clear();
     $("#tasks-list").replaceChildren();
     await refreshTasks();
   } else {
-    show("dashboard-view");
-    await loadDashboard();
+    await loadLibraryPage();
   }
+}
+
+function setActiveLinks(selector, attribute, current) {
+  for (const link of document.querySelectorAll(selector)) {
+    const active = link.dataset[attribute] === current;
+    link.classList.toggle("active", active);
+    if (active) link.setAttribute("aria-current", "page"); else link.removeAttribute("aria-current");
+  }
+}
+
+function libraryPageVisible() {
+  return isVisible("settings-view") && !$("#settings-library").hidden;
+}
+
+function tasksPageVisible() {
+  return isVisible("settings-view") && !$("#settings-tasks").hidden;
+}
+
+// The connection and library cards are shared by the wizard and Settings → Library.
+function mountLibraryPanels(target) {
+  const panels = $("#library-panels");
+  if (panels.parentElement !== target) target.append(panels);
 }
 
 window.addEventListener("hashchange", () => route().catch(() => {}));
@@ -185,7 +214,7 @@ function renderStatus(status) {
   error.textContent = connected ? "" : status.error ?? "";
 }
 
-async function loadDashboard() {
+async function loadConnection() {
   savedConnection = await api("GET", "/api/jellyfin");
   if (savedConnection.configured) {
     jfForm.elements.url.value = savedConnection.url;
@@ -197,6 +226,14 @@ async function loadDashboard() {
 
   $("#conn-badge").textContent = savedConnection.configured ? "Checking…" : "Not connected";
   renderStatus(await api("GET", "/api/jellyfin/status"));
+}
+
+async function loadLibraryPage() {
+  mountLibraryPanels($("#settings-library"));
+  $("#jellyfin-card").hidden = false;
+  $("#save-btn").textContent = "Save";
+  $("#library-back").hidden = true;
+  await loadConnection();
   await loadLibraries();
 }
 
@@ -224,7 +261,12 @@ jfForm.addEventListener("submit", async (event) => {
     const result = await busy(jfButtons(), () => api("PUT", "/api/jellyfin", formPayload()));
     jfForm.elements.apiKey.value = "";
     jfForm.elements.password.value = "";
-    await loadDashboard();
+    if (isVisible("wizard-view")) {
+      wizardStep = 2;
+      pickerOpen = true;
+      return await loadWizard();
+    }
+    await loadLibraryPage();
     setMessage(jfForm, "success", `Saved. Connected to ${result.server.name}.`);
   } catch (err) {
     setMessage(jfForm, "error", err.message);
@@ -237,7 +279,7 @@ $("#disconnect-btn").addEventListener("click", async () => {
     await busy(jfButtons(), () => api("DELETE", "/api/jellyfin"));
     jfForm.reset();
     pickerOpen = false;
-    await loadDashboard();
+    await loadLibraryPage();
   } catch (err) {
     setMessage(jfForm, "error", err.message);
   }
@@ -271,7 +313,7 @@ function renderLibraries() {
   const picking = libraries.reachable && (!libraries.selectionConfirmed || pickerOpen);
   libraryForm.hidden = !picking;
   $("#library-index").hidden = picking;
-  $("#library-cancel").hidden = !libraries.selectionConfirmed;
+  $("#library-cancel").hidden = !libraries.selectionConfirmed || isVisible("wizard-view");
 
   if (picking) {
     renderPicker();
@@ -357,7 +399,8 @@ libraryForm.addEventListener("submit", async (event) => {
     await busy([$('button[type="submit"]', libraryForm)],
       () => api("PUT", "/api/libraries/selection", { libraryIds: checked }));
     pickerOpen = false;
-    await loadLibraries();
+    wizardStep = null;
+    await (isVisible("wizard-view") ? loadWizard() : loadLibraries());
   } catch (err) {
     setMessage(libraryForm, "error", err.message);
   }
@@ -371,6 +414,94 @@ $("#library-change").addEventListener("click", () => {
 $("#library-cancel").addEventListener("click", () => {
   pickerOpen = false;
   renderLibraries();
+});
+
+// ---- One-time setup wizard --------------------------------------------------
+
+// Set when the user moves back a step; otherwise the step comes from server state.
+let wizardStep = null;
+
+async function loadWizard() {
+  mountLibraryPanels($("#wizard-slot"));
+  $("#save-btn").textContent = "Save and continue";
+  await loadConnection();
+  libraries = await api("GET", "/api/libraries");
+  renderLibraries();
+
+  const step = wizardStep ?? (
+    libraries.selectionConfirmed ? 3 : libraries.configured && libraries.reachable ? 2 : 1);
+
+  $("#jellyfin-card").hidden = step !== 1;
+  if (step !== 2) $("#libraries-card").hidden = true;
+  $("#library-back").hidden = step !== 2;
+  $("#wizard-scan").hidden = step !== 3;
+  for (const item of document.querySelectorAll("#wizard-steps li")) {
+    const number = Number(item.dataset.step);
+    item.classList.toggle("current", number === step);
+    item.classList.toggle("done", number < step);
+    if (number === step) item.setAttribute("aria-current", "step"); else item.removeAttribute("aria-current");
+  }
+
+  if (step === 3) await refreshTasks();
+}
+
+function wizardOnScanStep() {
+  return isVisible("wizard-view") && !$("#wizard-scan").hidden;
+}
+
+async function updateWizardScan() {
+  const task = tasksState.tasks.find((t) => t.key === SCAN_TASK);
+  const progress = $("#wizard-progress");
+  const error = $("#wizard-scan-error");
+
+  if (task.running) {
+    $("#wizard-scan-status").textContent = progressText(task.running);
+    if (task.running.total) {
+      progress.max = task.running.total;
+      progress.value = task.running.processed;
+    } else {
+      progress.removeAttribute("value");
+    }
+    progress.hidden = false;
+    error.hidden = true;
+    $("#wizard-scan-actions").hidden = true;
+    pollTimer = setTimeout(refreshTasks, POLL_RUNNING_MS);
+    return;
+  }
+
+  const session = await api("GET", "/api/session");
+  if (session.setupComplete) {
+    history.replaceState(null, "", "#/guide");
+    await route();
+    return;
+  }
+
+  const lastRun = task.recentRuns[0];
+  progress.hidden = true;
+  $("#wizard-scan-status").textContent = lastRun ? "The first scan didn't finish." : "The first scan hasn't started.";
+  error.hidden = !lastRun?.error;
+  error.textContent = lastRun?.error ?? "";
+  $("#wizard-scan-actions").hidden = false;
+  pollTimer = setTimeout(refreshTasks, POLL_IDLE_MS);
+}
+
+function showWizardScanError(message) {
+  const error = $("#wizard-scan-error");
+  error.hidden = false;
+  error.textContent = message;
+}
+
+$("#wizard-retry").addEventListener("click", () => runTask(SCAN_TASK, showWizardScanError));
+
+$("#wizard-change").addEventListener("click", () => {
+  wizardStep = 2;
+  pickerOpen = true;
+  loadWizard().catch((err) => showWizardScanError(err.message));
+});
+
+$("#library-back").addEventListener("click", () => {
+  wizardStep = 1;
+  loadWizard().catch((err) => setMessage(libraryForm, "error", err.message));
 });
 
 // ---- Tasks and scan status --------------------------------------------------
@@ -420,11 +551,15 @@ async function refreshTasks() {
   renderScanStatus();
   renderTasks();
 
-  if (wasRunning && !running && isVisible("dashboard-view")) {
+  if (isVisible("wizard-view")) {
+    if (wizardOnScanStep()) await updateWizardScan();
+    return;
+  }
+  if (wasRunning && !running && libraryPageVisible()) {
     await loadLibraries();
     return;
   }
-  if (isVisible("dashboard-view") || isVisible("settings-view")) {
+  if (libraryPageVisible() || tasksPageVisible()) {
     pollTimer = setTimeout(refreshTasks, running ? POLL_RUNNING_MS : POLL_IDLE_MS);
   }
 }
@@ -532,7 +667,7 @@ function buildTaskCard(task) {
 }
 
 function renderTasks() {
-  if (!isVisible("settings-view")) return;
+  if (!tasksPageVisible()) return;
 
   for (const task of tasksState.tasks) {
     const card = taskCards.get(task.key) ?? buildTaskCard(task);

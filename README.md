@@ -7,9 +7,9 @@ PrimeTime is a self-hosted service that sits next to [Jellyfin](https://jellyfin
 can tune in and see whatever is "on" instead of picking something to watch. Native apps for iPhone,
 iPad and Apple TV come later.
 
-> **Status: early.** Right now PrimeTime runs in Docker, gives you an admin web UI, connects to a
-> Jellyfin server, and keeps an index of the movies and shows in the libraries you choose. Channels,
-> scheduling, the guide and playback come next.
+> **Status: early.** Right now PrimeTime runs in Docker, walks you through a one-time setup, connects
+> to a Jellyfin server, and keeps an index of the movies and shows in the libraries you choose. The
+> Guide page is a placeholder for now. Channels, scheduling, the guide and playback come next.
 
 ## Quick start
 
@@ -26,16 +26,22 @@ Open <http://localhost:8080> (or the port you set as `PRIMETIME_HTTP_PORT`).
 
 1. **Create the admin account.** The first visit asks for a username and password. This is the
    PrimeTime admin login, separate from your Jellyfin users.
-2. **Connect Jellyfin.** Enter the server URL and choose how PrimeTime signs in:
+2. **Connect Jellyfin.** This starts a one-time setup. Enter the server URL and choose how PrimeTime
+   signs in:
    - **API key** (recommended): in Jellyfin, open *Dashboard → API Keys*, create a key named
      "PrimeTime", and paste it in.
    - **Username and password**: PrimeTime signs in once, keeps the access token Jellyfin returns,
      and doesn't store the password. An administrator account sees each library's folder paths; a
      regular account sees just the libraries it has access to.
-3. **Test connection** checks the details without saving them. **Save** checks them again and
-   stores them. The page then shows the server name and version.
+3. **Test connection** checks the details without saving them. **Save and continue** checks them
+   again and stores them.
 4. **Choose your libraries.** Tick the libraries to include and choose **Confirm and scan**. Movie,
-   show and mixed libraries can be indexed. PrimeTime scans them right away and shows the progress.
+   show and mixed libraries can be indexed.
+5. **Wait for the first scan.** When it finishes, PrimeTime opens the **Guide** page. If every
+   library fails to scan, you can try again or change your selection from the same screen.
+
+Setup only happens once. After that, the connection and libraries are managed under
+*Settings → Library*, even if you disconnect Jellyfin later.
 
 ## The library index
 
@@ -47,7 +53,7 @@ Each scan also removes items that are gone from Jellyfin. If a library fails to 
 returns fewer items than it reported, PrimeTime keeps what it has for that library and tries again
 on the next scan.
 
-**Change libraries** on the Library page updates your selection. Leaving a library out removes its
+**Change libraries** under *Settings → Library* updates your selection. Leaving a library out removes its
 items from the index. Connecting a different Jellyfin server, or disconnecting, clears the selection
 and the whole index.
 

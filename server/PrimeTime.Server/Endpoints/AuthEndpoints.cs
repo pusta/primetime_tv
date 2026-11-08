@@ -15,10 +15,11 @@ public static class AuthEndpoints
     {
         var api = app.MapGroup("/api");
 
-        // Tells the UI which screen to show: first-run setup, login, or the dashboard.
-        api.MapGet("/session", (HttpContext http, AdminUserStore users) => Results.Ok(new
+        // Tells the UI which screen to show: create admin, login, first-run setup, or the app.
+        api.MapGet("/session", (HttpContext http, AdminUserStore users, SettingsStore settings) => Results.Ok(new
         {
             needsSetup = !users.AnyExist(),
+            setupComplete = settings.IsSetupComplete(),
             authenticated = http.User.Identity?.IsAuthenticated == true,
             username = http.User.Identity?.Name,
         }));
