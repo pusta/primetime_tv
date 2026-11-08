@@ -7,7 +7,8 @@ namespace PrimeTime.Server.Security;
 public static class WebHardening
 {
     private const string ContentSecurityPolicy =
-        "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; " +
+        "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; media-src 'self' blob:; " +
+        "connect-src 'self'; " +
         "form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
 
     /// <summary>Must come before anything that reads the client's address or the request scheme.</summary>

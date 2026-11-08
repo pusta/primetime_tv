@@ -9,6 +9,7 @@ using PrimeTime.Server.Endpoints;
 using PrimeTime.Server.Guide;
 using PrimeTime.Server.Jellyfin;
 using PrimeTime.Server.Library;
+using PrimeTime.Server.Playback;
 using PrimeTime.Server.Security;
 using PrimeTime.Server.Tasks;
 
@@ -54,6 +55,8 @@ builder.Services.AddSingleton<ChannelLogoStore>();
 builder.Services.AddSingleton<ChannelColors>();
 builder.Services.AddSingleton<ScheduleStore>();
 builder.Services.AddSingleton<ScheduleService>();
+builder.Services.AddSingleton<PlaybackSessions>();
+builder.Services.AddScoped<PlaybackService>();
 
 builder.Services.AddSingleton<IScheduledTask, LibraryScanTask>();
 builder.Services.AddSingleton<IScheduledTask, GuideScheduleTask>();
@@ -125,6 +128,7 @@ app.MapLibraryEndpoints();
 app.MapTaskEndpoints();
 app.MapChannelEndpoints();
 app.MapGuideEndpoints();
+app.MapPlaybackEndpoints();
 
 app.Logger.LogInformation("PrimeTime {Version} starting, data directory {DataDir}",
     AppInfo.Version, options.DataDir);

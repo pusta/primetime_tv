@@ -168,6 +168,119 @@ public sealed class JellyfinClient(HttpClient http)
         }
     }
 
+    /// <summary>The descriptive details of one movie, show or episode, or null if Jellyfin doesn't have it.</summary>
+    public async Task<JellyfinItemDetails?> GetItemDetailsAsync(
+        string baseUrl, string deviceId, string token, string? userId, string itemId, CancellationToken ct)
+    {
+        var url = $"{baseUrl}/Items?ids={Uri.EscapeDataString(itemId)}" +
+                  "&fields=Overview,Genres,Studios,People,Taglines&enableImages=false&enableUserData=false";
+        if (userId is not null)
+        {
+            url += $"&userId={Uri.EscapeDataString(userId)}";
+        }
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.TryAddWithoutValidation("Authorization", AuthHeader(deviceId, token));
+        var page = await SendAsync<JellyfinItemDetailsPage>(request, ct);
+        return page?.Items?.FirstOrDefault();
+    }
+
+    /// <summary>An API key isn't tied to a user, but Jellyfin needs one to work out playback.</summary>
+    public async Task<string?> GetAdminUserIdAsync(string baseUrl, string deviceId, string token, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"{baseUrl}/Users");
+        request.Headers.TryAddWithoutValidation("Authorization", AuthHeader(deviceId, token));
+        var users = await SendAsync<List<JellyfinUser>>(request, ct);
+        return users?.FirstOrDefault(u => u.Policy is { IsAdministrator: true, IsDisabled: false })?.Id;
+    }
+
+    /// <summary>
+    /// Asks Jellyfin how to stream an item to a browser. The profile allows only HLS with H.264 and AAC,
+    /// and Jellyfin decides what to convert and what it can pass along untouched.
+    /// </summary>
+    public async Task<JellyfinPlaybackInfo> GetPlaybackInfoAsync(
+        string baseUrl, string deviceId, string token, string itemId, string userId, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post, $"{baseUrl}/Items/{Uri.EscapeDataString(itemId)}/PlaybackInfo");
+        request.Headers.TryAddWithoutValidation("Authorization", AuthHeader(deviceId, token));
+        request.Content = new StringContent(
+            JsonSerializer.Serialize(new
+            {
+                UserId = userId,
+                MediaSourceId = itemId,
+                DeviceProfile = new
+                {
+                    MaxStreamingBitrate = 20_000_000,
+                    TranscodingProfiles = new[]
+                    {
+                        new
+                        {
+                            Container = "ts",
+                            Type = "Video",
+                            VideoCodec = "h264",
+                            AudioCodec = "aac",
+                            Context = "Streaming",
+                            Protocol = "hls",
+                            MaxAudioChannels = "2",
+                            MinSegments = 1,
+                            BreakOnNonKeyFrames = true,
+                        },
+                    },
+                },
+            }),
+            System.Text.Encoding.UTF8,
+            "application/json");
+        return await SendAsync<JellyfinPlaybackInfo>(request, ct, timeout: ItemPageTimeout)
+               ?? throw new JellyfinException("Jellyfin returned no playback details.");
+    }
+
+    /// <summary>Opens a stream file. The caller reads the body and disposes the response.</summary>
+    public async Task<HttpResponseMessage> OpenStreamAsync(
+        string baseUrl, string deviceId, string token, string pathAndQuery, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, baseUrl + pathAndQuery);
+        request.Headers.TryAddWithoutValidation("Authorization", AuthHeader(deviceId, token));
+
+        // Jellyfin holds a segment back until it has been encoded, so give it time.
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(ItemPageTimeout);
+        try
+        {
+            return await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeoutCts.Token);
+        }
+        catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            throw new JellyfinException("Timed out waiting for the Jellyfin server.", ex);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new JellyfinException("Couldn't reach the Jellyfin server.", ex);
+        }
+    }
+
+    /// <summary>Tells Jellyfin nobody is watching this stream, so it can stop encoding.</summary>
+    public async Task StopEncodingAsync(
+        string baseUrl, string deviceId, string token, string playSessionId, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Delete,
+            $"{baseUrl}/Videos/ActiveEncodings?deviceId={Uri.EscapeDataString(deviceId)}" +
+            $"&playSessionId={Uri.EscapeDataString(playSessionId)}");
+        request.Headers.TryAddWithoutValidation("Authorization", AuthHeader(deviceId, token));
+
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(DefaultTimeout);
+        try
+        {
+            using var _ = await http.SendAsync(request, timeoutCts.Token);
+        }
+        catch (Exception ex) when (ex is HttpRequestException ||
+                                   (ex is OperationCanceledException && !ct.IsCancellationRequested))
+        {
+            throw new JellyfinException("Couldn't reach the Jellyfin server.", ex);
+        }
+    }
+
     /// <summary>Ends a session created by AuthenticateByName (used after a test-only login).</summary>
     public async Task LogoutAsync(string baseUrl, string deviceId, string token, CancellationToken ct)
     {

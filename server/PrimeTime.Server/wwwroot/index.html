@@ -6,6 +6,7 @@
   <title>PrimeTime</title>
   <script src="theme-init.js"></script>
   <link rel="stylesheet" href="app.css">
+  <script src="vendor/hls.min.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -209,6 +210,25 @@
     </section>
 
     <!-- Settings -->
+    <section id="player-view" hidden>
+      <a class="back-link" href="#/guide">← Guide</a>
+      <div class="player-head">
+        <span class="player-channel" id="player-channel"></span>
+        <div>
+          <h1 id="player-title"></h1>
+          <p class="muted" id="player-detail"></p>
+        </div>
+      </div>
+      <div class="player-frame"><video id="player-video" controls autoplay playsinline></video></div>
+      <p class="error" id="player-error" role="alert" hidden></p>
+      <div class="actions">
+        <button type="button" class="secondary" id="player-restart">Start from Beginning</button>
+        <button type="button" class="secondary" id="player-live" hidden>Back to Live</button>
+        <button type="button" class="secondary" id="player-info-toggle" aria-expanded="false" aria-controls="player-info">Info</button>
+      </div>
+      <div class="card player-info" id="player-info" hidden></div>
+    </section>
+
     <section id="settings-view" hidden>
       <h1>Settings</h1>
       <div class="settings">

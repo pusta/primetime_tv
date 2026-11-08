@@ -49,6 +49,37 @@ public sealed record JellyfinMediaItem(
     int? ParentIndexNumber,
     int? IndexNumber);
 
+public sealed record JellyfinPerson(string? Name, string? Role, string? Type);
+
+public sealed record JellyfinItemDetails(
+    string? Id,
+    string? Name,
+    string? Type,
+    string? Overview,
+    int? ProductionYear,
+    string? OfficialRating,
+    double? CommunityRating,
+    long? RunTimeTicks,
+    string? PremiereDate,
+    List<string>? Genres,
+    List<JellyfinNamedItem>? Studios,
+    List<JellyfinPerson>? People,
+    List<string>? Taglines,
+    string? SeriesId,
+    string? SeriesName,
+    int? ParentIndexNumber,
+    int? IndexNumber);
+
+public sealed record JellyfinItemDetailsPage(List<JellyfinItemDetails>? Items);
+
+public sealed record JellyfinUserPolicy(bool IsAdministrator, bool IsDisabled);
+
+public sealed record JellyfinUser(string? Id, JellyfinUserPolicy? Policy);
+
+public sealed record JellyfinMediaSource(string? TranscodingUrl);
+
+public sealed record JellyfinPlaybackInfo(List<JellyfinMediaSource>? MediaSources, string? PlaySessionId);
+
 // What PrimeTime returns to its own UI.
 
 public sealed record ServerSummary(string Url, string? Name, string? Version, string? Id);
