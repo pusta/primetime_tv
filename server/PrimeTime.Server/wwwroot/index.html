@@ -68,17 +68,116 @@
       </div>
     </section>
 
-    <!-- Guide (placeholder) -->
+    <!-- Guide -->
     <section id="guide-view" hidden>
-      <h1>Guide</h1>
-      <div class="card guide-empty">
+      <div class="page-head">
+        <h1>Guide</h1>
+        <div class="actions" id="guide-tools" hidden>
+          <button type="button" class="secondary" id="guide-earlier">Earlier</button>
+          <button type="button" class="secondary" id="guide-now">Now</button>
+          <button type="button" class="secondary" id="guide-later">Later</button>
+          <a class="button" href="#/guide/add">Add channel</a>
+        </div>
+      </div>
+
+      <div class="card guide-empty" id="guide-empty" hidden>
         <svg class="tv" viewBox="0 0 480 340" role="img" aria-label="Outline of a television">
           <rect x="16" y="16" width="448" height="264" rx="24"/>
           <rect x="42" y="42" width="396" height="212" rx="10"/>
           <path d="M190 280 170 322M290 280l20 42M136 322h208"/>
         </svg>
-        <p class="muted">Your channel guide will appear here.</p>
+        <p class="muted">Add a channel to start your guide.</p>
+        <a class="button" href="#/guide/add">Add channel</a>
       </div>
+
+      <div id="guide-board" hidden>
+        <p class="muted guide-date" id="guide-date"></p>
+        <div class="guide-scroll card" id="guide-scroll">
+          <div class="guide-inner" id="guide-inner"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Add a channel -->
+    <section id="add-channel-view" class="narrow-page" hidden>
+      <a class="back-link" href="#/guide">← Guide</a>
+      <div class="page-head">
+        <h1>Add a channel</h1>
+        <a class="button" href="#/guide/channels/new">Build your own</a>
+      </div>
+      <p class="error" id="suggestions-error" role="alert" hidden></p>
+      <div id="suggestions"></div>
+    </section>
+
+    <!-- Build or edit a channel -->
+    <section id="channel-editor-view" class="narrow-page" hidden>
+      <a class="back-link" href="#/guide">← Guide</a>
+      <h1 id="editor-title">Build a channel</h1>
+      <form id="channel-form" class="card editor" autocomplete="off">
+        <div class="field-row">
+          <label class="grow">Name <input name="name" required maxlength="60"></label>
+          <label class="short">Number <input type="number" name="number" min="1" max="9999" placeholder="Auto"></label>
+        </div>
+
+        <fieldset class="segmented">
+          <legend>What plays on this channel</legend>
+          <label><input type="radio" name="contentType" value="movies" checked> Movies</label>
+          <label><input type="radio" name="contentType" value="shows"> Shows</label>
+        </fieldset>
+
+        <fieldset class="segmented">
+          <legend>How to fill it</legend>
+          <label><input type="radio" name="mode" value="filter" checked> By category</label>
+          <label><input type="radio" name="mode" value="pick"> Choose titles</label>
+          <label><input type="radio" name="mode" value="collection"> From collections</label>
+        </fieldset>
+
+        <div data-mode="filter" class="editor-section">
+          <div class="field-row">
+            <label>From year <input type="number" name="yearFrom" min="1870" max="2200" placeholder="Any"></label>
+            <label>Before year <input type="number" name="yearBefore" min="1870" max="2200" placeholder="Any"></label>
+          </div>
+          <p class="hint" id="year-hint"></p>
+          <div>
+            <h3>Genres</h3>
+            <div class="chips" id="genre-options"></div>
+          </div>
+          <div>
+            <h3 id="studio-label">Studios</h3>
+            <div class="chips" id="studio-options"></div>
+          </div>
+          <p class="hint">Leave a section empty to include everything.</p>
+        </div>
+
+        <div data-mode="pick" class="editor-section" hidden>
+          <label>Search <input type="search" id="title-search" placeholder="Search titles"></label>
+          <p class="hint" id="title-count"></p>
+          <ul class="checklist title-list" id="title-options"></ul>
+        </div>
+
+        <div data-mode="collection" class="editor-section" hidden>
+          <p class="hint">This channel plays whatever is in these Jellyfin collections. Changes you make
+            there show up here after the next library scan.</p>
+          <ul class="checklist title-list" id="collection-options"></ul>
+          <p class="muted" id="collection-empty" hidden></p>
+        </div>
+
+        <label>Air order
+          <select name="airOrder">
+            <option value="oldest">Release/Air Date - Oldest First</option>
+            <option value="newest">Release/Air Date - Newest First</option>
+            <option value="random" selected>Random</option>
+          </select>
+        </label>
+
+        <p class="preview" id="channel-preview" role="status"></p>
+        <p class="error" role="alert" hidden></p>
+        <div class="actions">
+          <button type="submit" id="channel-save">Save channel</button>
+          <a class="button secondary" href="#/guide">Cancel</a>
+          <button type="button" class="danger link" id="channel-delete" hidden>Delete channel</button>
+        </div>
+      </form>
     </section>
 
     <!-- Settings -->

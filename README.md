@@ -8,8 +8,8 @@ can tune in and see whatever is "on" instead of picking something to watch. Nati
 iPad and Apple TV come later.
 
 > **Status: early.** Right now PrimeTime runs in Docker, walks you through a one-time setup, connects
-> to a Jellyfin server, and keeps an index of the movies and shows in the libraries you choose. The
-> Guide page is a placeholder for now. Channels, scheduling, the guide and playback come next.
+> to a Jellyfin server, keeps an index of the movies and shows in the libraries you choose, and
+> schedules channels into a TV guide. Playback comes next.
 
 ## Quick start
 
@@ -57,11 +57,44 @@ on the next scan.
 items from the index. Connecting a different Jellyfin server, or disconnecting, clears the selection
 and the whole index.
 
+## Channels and the Guide
+
+The **Guide** shows what's on each channel, up to 7 days ahead. Choose **Add channel** to add one of
+the channels PrimeTime suggests from your library (your collections, or by genre, decade, network, or
+a single-show marathon), or choose **Build your own**:
+
+- Pick **Movies** or **Shows**.
+- **By category** includes everything matching a year range, genres and studios or networks. "Before
+  year" isn't included, so from 1980, before 1990 means the 1980s. New matching titles join by
+  themselves.
+- **Choose titles** plays only the movies or shows you select.
+- **From collections** plays whatever is in the Jellyfin collections you select, so you can manage a
+  channel's content from Jellyfin. Include **Collections** in your libraries under *Settings → Library*
+  to use this. Changes reach the channel after the next library scan. Only items in your selected
+  movie and show libraries can play, and a channel plays one type of content, so a collection
+  holding both movies and shows contributes just the type you chose.
+
+Programs run back-to-back. Each channel has an **Air order**: by release or air date, oldest first or
+newest first, or random. On a channel with several shows, the order applies to all their episodes
+together. Everything plays once before any repeat. Items with no known runtime and season 0 specials
+are left out.
+
+Each schedule is stored ahead of time, so what's on doesn't move when the library changes. Editing a
+channel replaces what hasn't started yet, and whatever is on air finishes first. Changing the air
+order starts again from the top of the new order. After a scan, a
+channel is rescheduled only if something it was going to play has been removed or one of its
+collections changed. Select a channel's
+name in the Guide to edit it.
+
+Channels survive disconnecting and reconnecting the same Jellyfin server. Connecting a different
+server removes them, because its items are different.
+
 ## Scheduled tasks
 
-*Settings → Scheduled Tasks* controls background jobs. For now that's the **Library scan**, which
-runs every 4 hours by default. You can change the interval (15 minutes to 30 days), turn automatic
-runs off, start a run, stop one, and see the last 10 runs.
+*Settings → Scheduled Tasks* controls background jobs: the **Library scan**, every 4 hours by
+default, and the **Guide schedule**, hourly by default, which keeps channels scheduled a week ahead.
+You can change either interval (15 minutes to 30 days), turn automatic runs off, start a run, stop
+one, and see the last 10 runs.
 
 The next run is counted from the end of the last one. Saving a shorter interval never starts a scan
 straight away. If PrimeTime was stopped when a scan was due, or was restarted partway through one,
@@ -139,9 +172,11 @@ The container's Docker `HEALTHCHECK` calls it too.
 ├── server/
 │   └── PrimeTime.Server/     # backend API and web management UI
 │       ├── Program.cs        # startup: services, auth, middleware, routes
-│       ├── Endpoints/        # HTTP routes: /health, auth, /api/jellyfin, /api/libraries, /api/tasks
+│       ├── Endpoints/        # HTTP routes: /health, auth, /api/jellyfin, /api/libraries, /api/tasks,
+│       │                     #   /api/channels, /api/catalog, /api/guide
 │       ├── Jellyfin/         # Jellyfin API client and connection logic
 │       ├── Library/          # library selection and the scan task
+│       ├── Guide/            # channel rules, schedule generator, suggestions
 │       ├── Tasks/            # background task runner and scheduler
 │       ├── Data/             # SQLite access, schema migrations, stores
 │       ├── Security/         # password hashing

@@ -25,6 +25,7 @@ public sealed record LibraryView(
     int Movies,
     int Shows,
     int Episodes,
+    int Collections,
     DateTimeOffset? LastScannedAt,
     string? LastScanError);
 
@@ -34,6 +35,7 @@ public sealed class LibraryService(
     JellyfinConnectionStore connections,
     SettingsStore settings,
     LibraryStore libraries,
+    CollectionStore collections,
     TaskRunner runner)
 {
     /// <summary>Stored libraries, refreshed from Jellyfin when it can be reached.</summary>
@@ -56,13 +58,16 @@ public sealed class LibraryService(
             error = ex.Message;
         }
 
+        var collectionCount = collections.List().Count;
         var views = libraries.List()
             .Select(l => new LibraryView(
                 l.Id, l.Name, l.CollectionType, l.Locations,
                 LibraryTypes.IsSupported(l.CollectionType),
                 l.Selected,
                 Available: liveIds?.Contains(l.Id) ?? true,
-                l.Movies, l.Shows, l.Episodes, l.LastScannedAt, l.LastScanError))
+                l.Movies, l.Shows, l.Episodes,
+                Collections: l.CollectionType == LibraryTypes.Collections ? collectionCount : 0,
+                l.LastScannedAt, l.LastScanError))
             .ToList();
 
         return new LibraryOverview(true, liveIds is not null, error, views.Any(l => l.Selected), views);
@@ -93,13 +98,19 @@ public sealed class LibraryService(
         }
 
         var liveIds = await RefreshAsync(connection, ct);
-        var supportedIds = libraries.List()
+        var supported = libraries.List()
             .Where(l => LibraryTypes.IsSupported(l.CollectionType) && liveIds.Contains(l.Id))
-            .Select(l => l.Id)
-            .ToHashSet();
-        if (!requested.IsSubsetOf(supportedIds))
+            .ToDictionary(l => l.Id);
+        if (!requested.All(supported.ContainsKey))
         {
             throw new LibrarySelectionException("One of those libraries can't be indexed. Reload and try again.");
+        }
+
+        // A collection only points at items, so what it holds has to come from a media library.
+        if (!requested.Any(id => LibraryTypes.HoldsMedia(supported[id].CollectionType)))
+        {
+            throw new LibrarySelectionException(
+                "Collections play movies and shows from your other libraries, so select at least one of those too.");
         }
 
         await runner.RunExclusiveAsync(() => libraries.ApplySelection(requested));
