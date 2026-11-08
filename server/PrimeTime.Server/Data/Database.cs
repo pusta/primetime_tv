@@ -217,6 +217,15 @@ public sealed class Database
         ALTER TABLE channels ADD COLUMN color TEXT;
         ALTER TABLE channels ADD COLUMN color_custom INTEGER NOT NULL DEFAULT 0;
         """,
+
+        // 9: Server-side sessions, so signing out really ends one.
+        """
+        CREATE TABLE sessions (
+            id           TEXT PRIMARY KEY,
+            admin_id     INTEGER NOT NULL REFERENCES admin_users (id) ON DELETE CASCADE,
+            last_seen_ts INTEGER NOT NULL
+        );
+        """,
     ];
 
     public Database(PrimeTimeOptions options, ILogger<Database> logger)

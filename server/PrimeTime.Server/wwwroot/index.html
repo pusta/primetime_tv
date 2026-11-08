@@ -4,17 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>PrimeTime</title>
-  <script>
-    // Runs before anything is drawn, so a dark page never flashes light on load.
-    (function () {
-      var theme = null;
-      try { theme = localStorage.getItem("primetime.theme"); } catch (e) {}
-      if (theme !== "light" && theme !== "dark") {
-        theme = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-      }
-      document.documentElement.dataset.theme = theme;
-    })();
-  </script>
+  <script src="theme-init.js"></script>
   <link rel="stylesheet" href="app.css">
   <script src="app.js" defer></script>
 </head>
@@ -225,6 +215,7 @@
         <nav class="subnav" aria-label="Settings">
           <a href="#/settings/library" data-sub="library">Library</a>
           <a href="#/settings/scheduled-tasks" data-sub="tasks">Scheduled Tasks</a>
+          <a href="#/settings/account" data-sub="account">Account</a>
         </nav>
         <div class="settings-content">
           <div id="settings-library" hidden>
@@ -322,6 +313,19 @@
         </div>
       </div>
             </div>
+          </div>
+          <div id="settings-account" hidden>
+            <h2 class="section-title">Account</h2>
+            <form class="card" id="password-form" autocomplete="on">
+              <h2>Change password</h2>
+              <label>Current password <input name="currentPassword" type="password" autocomplete="current-password" required></label>
+              <label>New password <input name="newPassword" type="password" autocomplete="new-password" required minlength="8"></label>
+              <label>Confirm new password <input name="confirm" type="password" autocomplete="new-password" required minlength="8"></label>
+              <p class="hint">Your other devices will be signed out.</p>
+              <p class="error" role="alert" hidden></p>
+              <p class="success" role="status" hidden></p>
+              <div class="actions"><button type="submit">Change password</button></div>
+            </form>
           </div>
           <div id="settings-tasks" hidden>
             <h2 class="section-title">Scheduled Tasks</h2>

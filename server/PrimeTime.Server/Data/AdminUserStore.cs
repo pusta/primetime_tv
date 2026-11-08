@@ -55,4 +55,25 @@ public sealed class AdminUserStore(Database database)
             ? new AdminUser(reader.GetInt64(0), reader.GetString(1))
             : null;
     }
+
+    /// <summary>Sets a new password if the current one is right.</summary>
+    public bool ChangePassword(long id, string currentPassword, string newPassword)
+    {
+        using var connection = database.Open();
+        using (var read = connection.CreateCommand())
+        {
+            read.CommandText = "SELECT password_hash FROM admin_users WHERE id = $id;";
+            read.Parameters.AddWithValue("$id", id);
+            if (read.ExecuteScalar() is not string stored || !PasswordHashing.Verify(currentPassword, stored))
+            {
+                return false;
+            }
+        }
+
+        using var update = connection.CreateCommand();
+        update.CommandText = "UPDATE admin_users SET password_hash = $hash WHERE id = $id;";
+        update.Parameters.AddWithValue("$id", id);
+        update.Parameters.AddWithValue("$hash", PasswordHashing.Hash(newPassword));
+        return update.ExecuteNonQuery() == 1;
+    }
 }

@@ -16,7 +16,6 @@ public static class HealthEndpoints
             var body = new
             {
                 status = databaseOk ? "healthy" : "unhealthy",
-                version = AppInfo.Version,
                 checks = new { database = databaseOk ? "ok" : "failed" },
             };
             return databaseOk

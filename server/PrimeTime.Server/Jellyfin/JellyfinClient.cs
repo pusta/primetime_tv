@@ -188,6 +188,12 @@ public sealed class JellyfinClient(HttpClient http)
 
     private static string AuthHeader(string deviceId, string? token)
     {
+        // The token goes inside a quoted header value, so anything else could break out of it.
+        if (token is not null && !token.All(c => c is >= '!' and <= '~' and not '"' and not '\\'))
+        {
+            throw new JellyfinException("That API key contains characters Jellyfin keys don't use.");
+        }
+
         var header = $"MediaBrowser Client=\"{ClientName}\", Device=\"{DeviceName}\", " +
                      $"DeviceId=\"{deviceId}\", Version=\"{AppInfo.Version}\"";
         return token is null ? header : header + $", Token=\"{token}\"";

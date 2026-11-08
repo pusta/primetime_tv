@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
 using PrimeTime.Server;
@@ -8,6 +9,7 @@ using PrimeTime.Server.Endpoints;
 using PrimeTime.Server.Guide;
 using PrimeTime.Server.Jellyfin;
 using PrimeTime.Server.Library;
+using PrimeTime.Server.Security;
 using PrimeTime.Server.Tasks;
 
 // `PrimeTime.Server healthcheck` is used by the Docker HEALTHCHECK so the
@@ -18,6 +20,8 @@ if (args.Length > 0 && args[0] == "healthcheck")
 }
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.WebHost.ConfigureKestrel(kestrel => kestrel.AddServerHeader = false);
 
 var options = PrimeTimeOptions.FromConfiguration(builder.Configuration);
 Directory.CreateDirectory(options.DataDir);
@@ -31,6 +35,7 @@ builder.Services.AddDataProtection()
 
 builder.Services.AddSingleton<Database>();
 builder.Services.AddSingleton<AdminUserStore>();
+builder.Services.AddSingleton<SessionStore>();
 builder.Services.AddSingleton<SettingsStore>();
 builder.Services.AddSingleton<JellyfinConnectionStore>();
 // JellyfinClient applies its own per-request timeouts.
@@ -66,6 +71,18 @@ builder.Services
         cookie.ExpireTimeSpan = TimeSpan.FromDays(7);
         cookie.SlidingExpiration = true;
         // This is a JSON API: answer 401/403 instead of redirecting to a login page.
+        // A cookie is only good while the server still has its session.
+        cookie.Events.OnValidatePrincipal = ctx =>
+        {
+            var sessions = ctx.HttpContext.RequestServices.GetRequiredService<SessionStore>();
+            if (ctx.Principal?.FindFirst(SessionStore.ClaimType)?.Value is { } id && sessions.IsActive(id))
+            {
+                return Task.CompletedTask;
+            }
+
+            ctx.RejectPrincipal();
+            return ctx.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+        };
         cookie.Events.OnRedirectToLogin = ctx =>
         {
             ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
@@ -94,6 +111,7 @@ app.Services.GetRequiredService<Database>().Migrate();
 app.Services.GetRequiredService<ChannelColors>().FillMissing();
 app.Services.GetRequiredService<TaskRunner>().Initialize();
 
+app.UseWebHardening(builder.Configuration["PRIMETIME_TRUSTED_PROXIES"]);
 app.UseDefaultFiles();
 app.UseStaticFiles();
 app.UseRateLimiter();

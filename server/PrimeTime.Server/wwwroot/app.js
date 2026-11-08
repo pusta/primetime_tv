@@ -34,7 +34,7 @@ async function api(method, path, body) {
   if (response.status !== 204) {
     try { data = await response.json(); } catch { data = null; }
   }
-  const signedInOnly = ["/api/jellyfin", "/api/libraries", "/api/tasks", "/api/channels", "/api/catalog", "/api/guide"].some((p) => path.startsWith(p));
+  const signedInOnly = ["/api/jellyfin", "/api/libraries", "/api/tasks", "/api/channels", "/api/catalog", "/api/guide", "/api/account"].some((p) => path.startsWith(p));
   if (response.status === 401 && signedInOnly) {
     await route();
     throw new Error("Your session expired. Sign in again.");
@@ -96,17 +96,22 @@ async function route() {
   if (!inSettings) return routeGuide();
 
   show("settings-view");
-  const onTasks = location.hash.startsWith("#/settings/scheduled-tasks");
-  setActiveLinks(".subnav a", "sub", onTasks ? "tasks" : "library");
-  $("#settings-library").hidden = onTasks;
-  $("#settings-tasks").hidden = !onTasks;
+  const sub = location.hash.startsWith("#/settings/scheduled-tasks") ? "tasks"
+    : location.hash.startsWith("#/settings/account") ? "account" : "library";
+  setActiveLinks(".subnav a", "sub", sub);
+  $("#settings-library").hidden = sub !== "library";
+  $("#settings-tasks").hidden = sub !== "tasks";
+  $("#settings-account").hidden = sub !== "account";
 
-  if (onTasks) {
+  if (sub === "tasks") {
     taskCards.clear();
     $("#tasks-list").replaceChildren();
     await refreshTasks();
-  } else {
+  } else if (sub === "library") {
     await loadLibraryPage();
+  } else {
+    $("#password-form").reset();
+    setMessage($("#password-form"), null);
   }
 }
 
@@ -159,6 +164,20 @@ $("#login-form").addEventListener("submit", async (event) => {
     form.reset();
     setMessage(form, null);
     await route();
+  } catch (err) {
+    setMessage(form, "error", err.message);
+  }
+});
+
+$("#password-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const { currentPassword, newPassword, confirm } = Object.fromEntries(new FormData(form));
+  if (newPassword !== confirm) return setMessage(form, "error", "The new passwords don't match.");
+  try {
+    await busy([$("button", form)], () => api("POST", "/api/account/password", { currentPassword, newPassword }));
+    form.reset();
+    setMessage(form, "success", "Password changed. Your other devices have been signed out.");
   } catch (err) {
     setMessage(form, "error", err.message);
   }

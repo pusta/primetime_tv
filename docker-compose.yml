@@ -11,6 +11,7 @@ services:
       - "${PRIMETIME_HTTP_PORT:-8080}:8080"
     environment:
       TZ: ${TZ:-UTC}
+      PRIMETIME_TRUSTED_PROXIES: ${PRIMETIME_TRUSTED_PROXIES:-}
       Logging__LogLevel__Default: ${PRIMETIME_LOG_LEVEL:-Information}
     volumes:
       # SQLite database and the encryption keys for saved credentials.
