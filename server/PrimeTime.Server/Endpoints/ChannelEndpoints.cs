@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using PrimeTime.Server.Data;
 using PrimeTime.Server.Guide;
 
@@ -13,12 +14,14 @@ public sealed record ChannelRequest(
     List<string>? Genres,
     List<string>? Studios,
     List<string>? ItemIds,
-    string? AirOrder);
+    string? AirOrder,
+    string? Color);
 
-public static class ChannelEndpoints
+public static partial class ChannelEndpoints
 {
     private const int FacetsShown = 60;
     private const int PreviewSamples = 8;
+    private const int MaxLogoBytes = 2 * 1024 * 1024;
 
     public static void MapChannelEndpoints(this WebApplication app)
     {
@@ -59,16 +62,18 @@ public static class ChannelEndpoints
             store.Get(id) is { } channel ? Results.Ok(Describe(channel)) : NotFound());
 
         // What a channel with these rules would play, before it's saved.
-        channels.MapPost("/preview", (ChannelRequest body, CatalogStore catalog) =>
+        channels.MapPost("/preview", (ChannelRequest body, long? channelId, CatalogStore catalog, ChannelColors colors) =>
         {
             if (ParseDefinition(body, out var error) is not { } definition)
             {
                 return Error(error);
             }
 
-            var titles = new ChannelMatcher(definition).Select(catalog.Load());
+            var snapshot = catalog.Load();
+            var titles = new ChannelMatcher(definition).Select(snapshot);
             return Results.Ok(new
             {
+                automaticColor = colors.Automatic(definition, snapshot, channelId),
                 count = titles.Count,
                 episodes = titles.Sum(t => t.EpisodeCount),
                 hours = (int)(titles.Sum(t => t.RuntimeSeconds) / 3600),
@@ -76,18 +81,111 @@ public static class ChannelEndpoints
             });
         });
 
-        channels.MapPost("/", (ChannelRequest body, ChannelStore store, CatalogStore catalog, ScheduleService schedule) =>
-            Save(null, body, store, catalog, schedule));
+        channels.MapPost("/", (ChannelRequest body, ChannelStore store, CatalogStore catalog, ChannelColors colors, ScheduleService schedule) =>
+            Save(null, body, store, catalog, colors, schedule));
 
-        channels.MapPut("/{id:long}", (long id, ChannelRequest body, ChannelStore store, CatalogStore catalog, ScheduleService schedule) =>
-            store.Get(id) is null ? NotFound() : Save(id, body, store, catalog, schedule));
+        channels.MapPut("/{id:long}", (long id, ChannelRequest body, ChannelStore store, CatalogStore catalog, ChannelColors colors, ScheduleService schedule) =>
+            store.Get(id) is null ? NotFound() : Save(id, body, store, catalog, colors, schedule));
 
         channels.MapDelete("/{id:long}", (long id, ChannelStore store) =>
             store.Delete(id) ? Results.NoContent() : NotFound());
+
+        channels.MapGet("/{id:long}/logo", (long id, HttpResponse response, ChannelLogoStore logos) =>
+        {
+            if (logos.Get(id) is not { } logo)
+            {
+                return NotFound();
+            }
+
+            // The URL changes with the image, so a cached copy never goes stale.
+            response.Headers.CacheControl = "private, max-age=31536000, immutable";
+            response.Headers.XContentTypeOptions = "nosniff";
+            return Results.File(logo.Data, logo.ContentType);
+        });
+
+        // The body is the image itself. Its type comes from its contents, not what the client claims.
+        channels.MapPut("/{id:long}/logo", async (
+            long id, HttpRequest request, ChannelStore store, ChannelLogoStore logos, CancellationToken ct) =>
+        {
+            if (store.Get(id) is null)
+            {
+                return NotFound();
+            }
+
+            if (await ReadLogoAsync(request, ct) is not { } data)
+            {
+                return Results.BadRequest(new { error = "Logos can be up to 2 MB." });
+            }
+
+            if (DetectImageType(data) is not { } contentType)
+            {
+                return Results.BadRequest(new { error = "Logos need to be a PNG, JPEG, WebP or GIF image." });
+            }
+
+            logos.Save(id, new ChannelLogo(contentType, data));
+            return Results.Ok(new { logoUrl = store.Get(id)!.LogoUrl });
+        });
+
+        channels.MapDelete("/{id:long}/logo", (long id, ChannelStore store, ChannelLogoStore logos) =>
+        {
+            if (store.Get(id) is null)
+            {
+                return NotFound();
+            }
+
+            logos.Delete(id);
+            return Results.NoContent();
+        });
+    }
+
+    /// <summary>Returns the request body, or null if it's over the size limit.</summary>
+    private static async Task<byte[]?> ReadLogoAsync(HttpRequest request, CancellationToken ct)
+    {
+        if (request.ContentLength > MaxLogoBytes)
+        {
+            return null;
+        }
+
+        var buffer = new byte[MaxLogoBytes + 1];
+        var length = 0;
+        int read;
+        while (length < buffer.Length &&
+               (read = await request.Body.ReadAsync(buffer.AsMemory(length), ct)) > 0)
+        {
+            length += read;
+        }
+
+        return length > MaxLogoBytes ? null : buffer[..length];
+    }
+
+    /// <summary>
+    /// Recognises the image formats allowed for logos. SVG is left out on purpose,
+    /// because an SVG can carry scripts.
+    /// </summary>
+    private static string? DetectImageType(ReadOnlySpan<byte> data)
+    {
+        if (data.StartsWith<byte>([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]))
+        {
+            return "image/png";
+        }
+
+        if (data.StartsWith<byte>([0xFF, 0xD8, 0xFF]))
+        {
+            return "image/jpeg";
+        }
+
+        if (data.StartsWith("GIF87a"u8) || data.StartsWith("GIF89a"u8))
+        {
+            return "image/gif";
+        }
+
+        return data.Length >= 12 && data.StartsWith("RIFF"u8) && data[8..12].SequenceEqual("WEBP"u8)
+            ? "image/webp"
+            : null;
     }
 
     private static IResult Save(
-        long? id, ChannelRequest body, ChannelStore store, CatalogStore catalog, ScheduleService schedule)
+        long? id, ChannelRequest body, ChannelStore store, CatalogStore catalog, ChannelColors colors, ScheduleService schedule)
     {
         var name = body.Name?.Trim() ?? "";
         if (name.Length is < 1 or > 60)
@@ -100,7 +198,14 @@ public static class ChannelEndpoints
             return Error(error);
         }
 
-        if (new ChannelMatcher(definition).Select(catalog.Load()).Count == 0)
+        var customColor = string.IsNullOrWhiteSpace(body.Color) ? null : body.Color.Trim().ToLowerInvariant();
+        if (customColor is not null && !HexColor().IsMatch(customColor))
+        {
+            return Error("Choose a color like #3d9be9.");
+        }
+
+        var snapshot = catalog.Load();
+        if (new ChannelMatcher(definition).Select(snapshot).Count == 0)
         {
             return Error("Nothing in your library matches that yet. Widen the rules or choose some titles.");
         }
@@ -117,7 +222,8 @@ public static class ChannelEndpoints
         }
 
         var previousOrder = id is { } saved ? store.Get(saved)!.Definition.AirOrder : definition.AirOrder;
-        var channelId = store.Save(id, number, name, definition);
+        var color = customColor ?? colors.Automatic(definition, snapshot, id);
+        var channelId = store.Save(id, number, name, definition, color, customColor is not null);
         schedule.RebuildChannel(channelId, airOrderChanged: previousOrder != definition.AirOrder);
         return Results.Ok(Describe(store.Get(channelId)!));
     }
@@ -190,7 +296,13 @@ public static class ChannelEndpoints
         channel.Definition.Studios,
         channel.Definition.ItemIds,
         channel.Definition.AirOrder,
+        channel.LogoUrl,
+        channel.Color,
+        channel.ColorCustom,
     };
+
+    [GeneratedRegex("^#[0-9a-f]{6}$")]
+    private static partial Regex HexColor();
 
     private static IResult Error(string message) => Results.BadRequest(new { error = message });
 

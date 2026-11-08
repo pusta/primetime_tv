@@ -11,23 +11,22 @@
   --ok-bg: #e3f4ea;
   --warn-bg: #fdecea;
   --radius: 10px;
-  color-scheme: light dark;
+  color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #111317;
-    --surface: #1b1e24;
-    --text: #e8eaee;
-    --muted: #9aa1ad;
-    --border: #2d323b;
-    --accent: #8f7bff;
-    --accent-text: #120d2b;
-    --danger: #ff7a6e;
-    --ok: #6fd69c;
-    --ok-bg: #173225;
-    --warn-bg: #3a1d1a;
-  }
+:root[data-theme="dark"] {
+  --bg: #111317;
+  --surface: #1b1e24;
+  --text: #e8eaee;
+  --muted: #9aa1ad;
+  --border: #2d323b;
+  --accent: #8f7bff;
+  --accent-text: #120d2b;
+  --danger: #ff7a6e;
+  --ok: #6fd69c;
+  --ok-bg: #173225;
+  --warn-bg: #3a1d1a;
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -50,6 +49,22 @@ body {
 
 .brand { font-weight: 700; letter-spacing: 0.02em; }
 .topbar-right { display: flex; gap: 12px; align-items: center; color: var(--muted); }
+button.theme-toggle {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+}
+button.theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
+.theme-toggle svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.theme-toggle .sun, :root[data-theme="dark"] .theme-toggle .moon { display: none; }
+:root[data-theme="dark"] .theme-toggle .sun { display: block; }
 
 main { max-width: 860px; margin: 24px auto; padding: 0 16px; }
 
@@ -232,15 +247,20 @@ a.guide-channel:hover span { text-decoration: underline; }
   top: 4px;
   bottom: 4px;
   padding: 6px 8px;
-  background: var(--bg);
-  border: 1px solid var(--border);
+  /* Tints of the channel's color, so text stays readable whichever color and theme are in use. */
+  background: color-mix(in srgb, var(--channel, var(--border)) 24%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--channel, var(--border)) 45%, var(--surface));
+  border-left: 3px solid var(--channel, var(--border));
   border-radius: 6px;
   overflow: hidden;
   white-space: nowrap;
 }
-.guide-program.on-air { border-color: var(--accent); }
+.guide-program.on-air {
+  background: color-mix(in srgb, var(--channel, var(--border)) 33%, var(--surface));
+  border-color: var(--channel, var(--accent));
+}
 .guide-program strong, .guide-program small { display: block; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
-.guide-program small { color: var(--muted); }
+.guide-program small { color: var(--text); }
 .guide-none { position: absolute; left: 12px; top: 22px; color: var(--muted); }
 .guide-now-line { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); z-index: 2; pointer-events: none; }
 
@@ -289,3 +309,27 @@ a.guide-channel:hover span { text-decoration: underline; }
 }
 
 [hidden] { display: none !important; }
+
+.guide-logo { flex: 1; min-width: 0; height: 44px; display: flex; align-items: center; }
+.guide-logo img { max-width: 100%; max-height: 100%; object-fit: contain; }
+
+.logo-field { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; }
+.logo-preview {
+  flex: none;
+  width: 112px;
+  height: 72px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 6px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.logo-preview img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.logo-controls { display: grid; gap: 8px; }
+
+.color-field { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.color-field .segmented { margin: 0; }
+.color-swatch { width: 28px; height: 28px; border-radius: 6px; border: 1px solid var(--border); }
+input[type="color"].color-input { width: 56px; height: 36px; padding: 2px; }
