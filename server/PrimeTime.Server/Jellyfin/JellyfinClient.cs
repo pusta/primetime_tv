@@ -113,16 +113,43 @@ public sealed class JellyfinClient(HttpClient http)
     /// <summary>
     /// Fetches one page of a library's items of a single type (Movie, Series or Episode).
     /// Virtual items, such as known-but-missing episodes, are excluded because they can't be played.
+    /// Collapsing is off so that movies in a collection stay individual movies, not one collection item.
     /// </summary>
     public async Task<JellyfinMediaPage> GetItemsPageAsync(
         string baseUrl, string deviceId, string token, string? userId,
         string libraryId, string itemType, int startIndex, int limit, CancellationToken ct)
     {
-        var url = $"{baseUrl}/Items?parentId={Uri.EscapeDataString(libraryId)}&recursive=true" +
-                  $"&includeItemTypes={itemType}&excludeLocationTypes=Virtual" +
-                  $"&fields={IndexedItemFields}&sortBy=SortName&sortOrder=Ascending" +
-                  $"&startIndex={startIndex}&limit={limit}&enableTotalRecordCount=true" +
-                  "&enableImages=false&enableUserData=false";
+        var query = $"parentId={Uri.EscapeDataString(libraryId)}&recursive=true" +
+                    $"&includeItemTypes={itemType}&excludeLocationTypes=Virtual&collapseBoxSetItems=false" +
+                    $"&fields={IndexedItemFields}&sortBy=SortName&sortOrder=Ascending";
+        return await GetPageAsync(baseUrl, deviceId, token, userId, query, startIndex, limit, ct);
+    }
+
+    /// <summary>Fetches one page of the server's collections.</summary>
+    public Task<JellyfinMediaPage> GetCollectionsPageAsync(
+        string baseUrl, string deviceId, string token, string? userId,
+        int startIndex, int limit, CancellationToken ct) =>
+        GetPageAsync(baseUrl, deviceId, token, userId,
+            "recursive=true&includeItemTypes=BoxSet&fields=SortName&sortBy=SortName&sortOrder=Ascending",
+            startIndex, limit, ct);
+
+    /// <summary>
+    /// Fetches one page of the movies and shows in a collection. Without "recursive", Jellyfin
+    /// returns nothing for a collection when the request is made with an API key and no user.
+    /// </summary>
+    public Task<JellyfinMediaPage> GetCollectionItemsPageAsync(
+        string baseUrl, string deviceId, string token, string? userId,
+        string collectionId, int startIndex, int limit, CancellationToken ct) =>
+        GetPageAsync(baseUrl, deviceId, token, userId,
+            $"parentId={Uri.EscapeDataString(collectionId)}&recursive=true&includeItemTypes=Movie,Series",
+            startIndex, limit, ct);
+
+    private async Task<JellyfinMediaPage> GetPageAsync(
+        string baseUrl, string deviceId, string token, string? userId,
+        string query, int startIndex, int limit, CancellationToken ct)
+    {
+        var url = $"{baseUrl}/Items?{query}&startIndex={startIndex}&limit={limit}" +
+                  "&enableTotalRecordCount=true&enableImages=false&enableUserData=false";
         if (userId is not null)
         {
             url += $"&userId={Uri.EscapeDataString(userId)}";
@@ -137,7 +164,7 @@ public sealed class JellyfinClient(HttpClient http)
         }
         catch (JellyfinForbiddenException)
         {
-            throw new JellyfinException("Jellyfin refused access to this library.");
+            throw new JellyfinException("Jellyfin refused access to this content.");
         }
     }
 

@@ -140,6 +140,67 @@ public sealed class Database
         SELECT 'setup_complete', 'true', strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
         WHERE EXISTS (SELECT 1 FROM libraries WHERE selected = 1 AND last_scanned_at IS NOT NULL);
         """,
+
+        // 4: channels and their stored schedules.
+        """
+        CREATE TABLE channels (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            number       INTEGER NOT NULL UNIQUE,
+            name         TEXT NOT NULL,
+            content_type TEXT NOT NULL,
+            mode         TEXT NOT NULL,
+            year_from    INTEGER,
+            year_before  INTEGER,
+            genres       TEXT NOT NULL DEFAULT '[]',
+            studios      TEXT NOT NULL DEFAULT '[]',
+            created_at   TEXT NOT NULL,
+            updated_at   TEXT NOT NULL
+        );
+
+        CREATE TABLE channel_items (
+            channel_id INTEGER NOT NULL REFERENCES channels (id) ON DELETE CASCADE,
+            item_id    TEXT NOT NULL,
+            PRIMARY KEY (channel_id, item_id)
+        );
+
+        CREATE TABLE schedule_entries (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            channel_id     INTEGER NOT NULL REFERENCES channels (id) ON DELETE CASCADE,
+            item_type      TEXT NOT NULL,
+            item_id        TEXT NOT NULL,
+            show_id        TEXT,
+            season_number  INTEGER,
+            episode_number INTEGER,
+            title          TEXT NOT NULL,
+            subtitle       TEXT,
+            cycle          INTEGER NOT NULL DEFAULT 1,
+            start_ts       INTEGER NOT NULL,
+            end_ts         INTEGER NOT NULL,
+            UNIQUE (channel_id, start_ts)
+        );
+        CREATE INDEX ix_schedule_window ON schedule_entries (start_ts, end_ts);
+        """,
+
+        // 5: Jellyfin collections.
+        """
+        CREATE TABLE collections (
+            id        TEXT PRIMARY KEY,
+            name      TEXT NOT NULL,
+            sort_name TEXT
+        );
+
+        CREATE TABLE collection_items (
+            collection_id TEXT NOT NULL REFERENCES collections (id) ON DELETE CASCADE,
+            item_id       TEXT NOT NULL,
+            PRIMARY KEY (collection_id, item_id)
+        );
+        """,
+
+        // 6: The order a channel airs its content in. Keeps the closest thing to how each type played before.
+        """
+        ALTER TABLE channels ADD COLUMN air_order TEXT NOT NULL DEFAULT 'random';
+        UPDATE channels SET air_order = 'oldest' WHERE content_type = 'shows';
+        """,
     ];
 
     public Database(PrimeTimeOptions options, ILogger<Database> logger)

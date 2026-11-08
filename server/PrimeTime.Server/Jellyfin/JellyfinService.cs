@@ -1,4 +1,5 @@
 using PrimeTime.Server.Data;
+using PrimeTime.Server.Guide;
 using PrimeTime.Server.Library;
 using PrimeTime.Server.Tasks;
 
@@ -21,9 +22,12 @@ public sealed class JellyfinService(
     SettingsStore settings,
     LibraryStore libraries,
     ScheduledTaskStore scheduledTasks,
+    ScheduleService schedule,
     TaskRunner runner,
     ILogger<JellyfinService> logger)
 {
+    private const string ChannelsServerKey = "channels_server_id";
+
     /// <summary>Connects with the given details and reports what it found, without saving anything.</summary>
     public async Task<JellyfinConnectResult> TestAsync(JellyfinConnectRequest request, CancellationToken ct)
     {
@@ -66,6 +70,8 @@ public sealed class JellyfinService(
         {
             store.Save(connection);
         }
+
+        ForgetChannelsIfServerChanged(connection.ServerId);
 
         logger.LogInformation("Saved Jellyfin connection to {ServerName} ({Version}) using {AuthMethod}",
             attempt.Result.Server.Name, attempt.Result.Server.Version, attempt.AuthMethod);
@@ -113,6 +119,24 @@ public sealed class JellyfinService(
     {
         libraries.Reset();
         scheduledTasks.SetNextRun(LibraryScanTask.TaskKey, null);
+        schedule.RefreshAll();
+    }
+
+    // Channels survive a disconnect and reconnect to the same server, but a different
+    // server has different items, so remember which server they were built for.
+    private void ForgetChannelsIfServerChanged(string? serverId)
+    {
+        var channelsServer = settings.Get(ChannelsServerKey);
+        if (channelsServer is not null && channelsServer != serverId)
+        {
+            schedule.DeleteAllChannels();
+            logger.LogInformation("Jellyfin server changed; removed channels built for the old server");
+        }
+
+        if (serverId is not null)
+        {
+            settings.Set(ChannelsServerKey, serverId);
+        }
     }
 
     private async Task<ConnectAttempt> ConnectAsync(JellyfinConnectRequest request, CancellationToken ct)

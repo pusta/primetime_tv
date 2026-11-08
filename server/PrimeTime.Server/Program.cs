@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.DataProtection;
 using PrimeTime.Server;
 using PrimeTime.Server.Data;
 using PrimeTime.Server.Endpoints;
+using PrimeTime.Server.Guide;
 using PrimeTime.Server.Jellyfin;
 using PrimeTime.Server.Library;
 using PrimeTime.Server.Tasks;
@@ -41,7 +42,14 @@ builder.Services.AddSingleton<MediaIndexStore>();
 builder.Services.AddSingleton<ScheduledTaskStore>();
 builder.Services.AddScoped<LibraryService>();
 
+builder.Services.AddSingleton<CollectionStore>();
+builder.Services.AddSingleton<CatalogStore>();
+builder.Services.AddSingleton<ChannelStore>();
+builder.Services.AddSingleton<ScheduleStore>();
+builder.Services.AddSingleton<ScheduleService>();
+
 builder.Services.AddSingleton<IScheduledTask, LibraryScanTask>();
+builder.Services.AddSingleton<IScheduledTask, GuideScheduleTask>();
 builder.Services.AddSingleton<TaskRunner>();
 builder.Services.AddHostedService<TaskSchedulerService>();
 
@@ -94,6 +102,8 @@ app.MapAuthEndpoints();
 app.MapJellyfinEndpoints();
 app.MapLibraryEndpoints();
 app.MapTaskEndpoints();
+app.MapChannelEndpoints();
+app.MapGuideEndpoints();
 
 app.Logger.LogInformation("PrimeTime {Version} starting, data directory {DataDir}",
     AppInfo.Version, options.DataDir);

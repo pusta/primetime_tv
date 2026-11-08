@@ -20,10 +20,15 @@ public static class LibraryTypes
     public const string Movies = "movies";
     public const string Shows = "tvshows";
     public const string Mixed = "mixed";
+    public const string Collections = "boxsets";
 
     /// <summary>Only these Jellyfin library types can hold movies and shows.</summary>
-    public static bool IsSupported(string collectionType) =>
+    public static bool HoldsMedia(string collectionType) =>
         collectionType is Movies or Shows or Mixed;
+
+    /// <summary>What the admin can choose to include: media libraries and the Collections folder.</summary>
+    public static bool IsSupported(string collectionType) =>
+        HoldsMedia(collectionType) || collectionType == Collections;
 }
 
 /// <summary>The Jellyfin libraries PrimeTime knows about and which ones the admin included.</summary>
@@ -161,12 +166,12 @@ public sealed class LibraryStore(Database database)
         command.ExecuteNonQuery();
     }
 
-    /// <summary>Forgets every library and the whole index, e.g. after switching Jellyfin servers.</summary>
+    /// <summary>Forgets every library, collection and the whole index, e.g. after switching servers.</summary>
     public void Reset()
     {
         using var connection = database.Open();
         using var command = connection.CreateCommand();
-        command.CommandText = "DELETE FROM libraries;";
+        command.CommandText = "DELETE FROM collections; DELETE FROM libraries;";
         command.ExecuteNonQuery();
     }
 }
