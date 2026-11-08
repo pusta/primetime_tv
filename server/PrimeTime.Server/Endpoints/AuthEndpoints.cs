@@ -78,7 +78,7 @@ public static class AuthEndpoints
 
         // Changing the password signs out every other device.
         api.MapPost("/account/password", (
-            PasswordChangeRequest body, HttpContext http, AdminUserStore users, SessionStore sessions) =>
+            PasswordChangeRequest body, HttpContext http, AdminUserStore users, SessionStore sessions, DeviceStore devices) =>
         {
             var newPassword = body.NewPassword ?? "";
             if (newPassword.Length < MinPasswordLength)
@@ -93,6 +93,7 @@ public static class AuthEndpoints
             }
 
             sessions.DeleteOthers(adminId, http.User.FindFirstValue(SessionStore.ClaimType)!);
+            devices.RevokeAll(adminId);
             return Results.NoContent();
         }).RequireAuthorization().RequireRateLimiting("auth");
     }

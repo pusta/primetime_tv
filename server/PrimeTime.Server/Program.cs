@@ -37,6 +37,7 @@ builder.Services.AddDataProtection()
 builder.Services.AddSingleton<Database>();
 builder.Services.AddSingleton<AdminUserStore>();
 builder.Services.AddSingleton<SessionStore>();
+builder.Services.AddSingleton<DeviceStore>();
 builder.Services.AddSingleton<SettingsStore>();
 builder.Services.AddSingleton<JellyfinConnectionStore>();
 // JellyfinClient applies its own per-request timeouts.
@@ -96,8 +97,12 @@ builder.Services
             ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
             return Task.CompletedTask;
         };
-    });
-builder.Services.AddAuthorization();
+    })
+    .AddScheme<AuthenticationSchemeOptions, AppTokenHandler>(AppTokenHandler.SchemeName, null);
+builder.Services.AddAuthorizationBuilder()
+    .AddPolicy(AppTokenHandler.PolicyName, policy => policy
+        .AddAuthenticationSchemes(AppTokenHandler.SchemeName)
+        .RequireAuthenticatedUser());
 
 // Slow down password guessing on the login and first-run setup endpoints.
 builder.Services.AddRateLimiter(limiter =>
@@ -106,6 +111,10 @@ builder.Services.AddRateLimiter(limiter =>
     limiter.AddPolicy("auth", ctx => RateLimitPartition.GetFixedWindowLimiter(
         ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
         _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1) }));
+    // Apps check every few seconds while waiting for approval, and several can share an address.
+    limiter.AddPolicy("device-poll", ctx => RateLimitPartition.GetFixedWindowLimiter(
+        ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromMinutes(1) }));
 });
 
 var app = builder.Build();
@@ -129,6 +138,8 @@ app.MapTaskEndpoints();
 app.MapChannelEndpoints();
 app.MapGuideEndpoints();
 app.MapPlaybackEndpoints();
+app.MapDeviceEndpoints();
+app.MapAppApiEndpoints();
 
 app.Logger.LogInformation("PrimeTime {Version} starting, data directory {DataDir}",
     AppInfo.Version, options.DataDir);

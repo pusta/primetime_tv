@@ -229,12 +229,36 @@
       <div class="card player-info" id="player-info" hidden></div>
     </section>
 
+    <section id="link-view" class="card narrow" hidden>
+      <h1>Link a device</h1>
+      <form id="link-form" autocomplete="off">
+        <p class="muted">Enter the code shown on your TV, phone or tablet.</p>
+        <label>Code <input name="code" required maxlength="16" autocapitalize="characters" spellcheck="false" placeholder="ABCD-EFGH"></label>
+        <p class="error" role="alert" hidden></p>
+        <button type="submit">Continue</button>
+      </form>
+      <div id="link-confirm" hidden>
+        <p>Link <strong id="link-device"></strong> to your PrimeTime server?</p>
+        <p class="muted">Code <span id="link-code"></span>. Only continue if you started this on your own device. It will be able to watch your channels, but not change any settings.</p>
+        <p class="error" id="link-error" role="alert" hidden></p>
+        <div class="actions">
+          <button type="button" id="link-approve">Link device</button>
+          <button type="button" class="secondary" id="link-deny">Cancel</button>
+        </div>
+      </div>
+      <div id="link-done" hidden>
+        <p id="link-result"></p>
+        <a class="button secondary" href="#/guide">Go to the Guide</a>
+      </div>
+    </section>
+
     <section id="settings-view" hidden>
       <h1>Settings</h1>
       <div class="settings">
         <nav class="subnav" aria-label="Settings">
           <a href="#/settings/library" data-sub="library">Library</a>
           <a href="#/settings/scheduled-tasks" data-sub="tasks">Scheduled Tasks</a>
+          <a href="#/settings/devices" data-sub="devices">Devices</a>
           <a href="#/settings/account" data-sub="account">Account</a>
         </nav>
         <div class="settings-content">
@@ -332,6 +356,19 @@
           </div>
         </div>
       </div>
+            </div>
+          </div>
+          <div id="settings-devices" hidden>
+            <h2 class="section-title">Devices</h2>
+            <div class="card">
+              <div class="card-head">
+                <h2>Linked apps</h2>
+                <a class="button secondary" href="#/link">Link a device</a>
+              </div>
+              <p class="hint devices-hint">Apps can watch your channels but can't change any settings.</p>
+              <ul class="device-list" id="device-list"></ul>
+              <p class="muted" id="devices-empty" hidden>No apps linked yet.</p>
+              <p class="error" id="devices-error" role="alert" hidden></p>
             </div>
           </div>
           <div id="settings-account" hidden>

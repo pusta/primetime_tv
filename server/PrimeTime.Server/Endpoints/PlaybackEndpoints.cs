@@ -16,7 +16,7 @@ public static partial class PlaybackEndpoints
         {
             try
             {
-                var (channel, start) = await playback.StartAsync(id, ct);
+                var (channel, start) = await playback.StartAsync(id, StreamProfile.Compatible, ct);
                 if (channel is null)
                 {
                     return Results.NotFound(new { error = "That channel doesn't exist." });
@@ -64,61 +64,109 @@ public static partial class PlaybackEndpoints
             }
         });
 
-        // Passes Jellyfin's playlists and video segments through unchanged, apart from removing the key.
-        api.MapGet("/play/{playId}/{**path}", async (
-            string playId, string path, HttpContext http, PlaybackSessions sessions,
-            JellyfinConnectionStore connections, SettingsStore settings, JellyfinClient client) =>
-        {
-            if (!StreamFile().IsMatch(path) || sessions.Use(playId) is not { } session ||
-                connections.Get() is not { } connection)
-            {
-                return Results.NotFound();
-            }
-
-            var ct = http.RequestAborted;
-            var query = http.Request.QueryString.Value ?? "";
-            if (path == "master.m3u8" && query.Length == 0)
-            {
-                query = session.MasterQuery;
-            }
-
-            http.Response.Headers.CacheControl = "no-store";
-            try
-            {
-                using var upstream = await client.OpenStreamAsync(
-                    connection.BaseUrl, settings.GetOrCreateDeviceId(), connection.Token,
-                    $"{session.StreamPath}/{path}{PlaybackService.RemoveApiKey(query)}", ct);
-                if (!upstream.IsSuccessStatusCode)
-                {
-                    return Results.StatusCode(StatusCodes.Status502BadGateway);
-                }
-
-                if (path.EndsWith(".m3u8", StringComparison.Ordinal))
-                {
-                    var playlist = await upstream.Content.ReadAsStringAsync(ct);
-                    return Results.Text(PlaybackService.RemoveApiKey(playlist), "application/vnd.apple.mpegurl");
-                }
-
-                http.Response.ContentType = upstream.Content.Headers.ContentType?.ToString() ?? "video/mp2t";
-                http.Response.ContentLength = upstream.Content.Headers.ContentLength;
-                await upstream.Content.CopyToAsync(http.Response.Body, ct);
-                return Results.Empty;
-            }
-            catch (JellyfinException)
-            {
-                return Results.StatusCode(StatusCodes.Status502BadGateway);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                return Results.Empty; // The player moved on, which happens all the time when seeking.
-            }
-        });
+        api.MapGet("/play/{playId}/{**path}", RelayStreamAsync);
 
         api.MapDelete("/play/{playId}", async (string playId, PlaybackService playback, CancellationToken ct) =>
         {
             await playback.StopAsync(playId, ct);
             return Results.NoContent();
         });
+    }
+
+    /// <summary>Passes Jellyfin's playlists and video segments through unchanged, apart from removing the key.</summary>
+    public static async Task<IResult> RelayStreamAsync(
+        string playId, string path, HttpContext http, PlaybackSessions sessions,
+        JellyfinConnectionStore connections, SettingsStore settings, JellyfinClient client)
+    {
+        if (!StreamFile().IsMatch(path) || sessions.Use(playId) is not { } session ||
+            connections.Get() is not { } connection)
+        {
+            return Results.NotFound();
+        }
+
+        var ct = http.RequestAborted;
+        var query = http.Request.QueryString.Value ?? "";
+        if (path == "master.m3u8" && query.Length == 0)
+        {
+            query = session.MasterQuery;
+        }
+
+        http.Response.Headers.CacheControl = "no-store";
+        try
+        {
+            using var upstream = await client.OpenStreamAsync(
+                connection.BaseUrl, settings.GetOrCreateDeviceId(), connection.Token,
+                $"{session.StreamPath}/{path}{PlaybackService.RemoveApiKey(query)}", ct);
+            if (!upstream.IsSuccessStatusCode)
+            {
+                return Results.StatusCode(StatusCodes.Status502BadGateway);
+            }
+
+            if (path.EndsWith(".m3u8", StringComparison.Ordinal))
+            {
+                var playlist = await upstream.Content.ReadAsStringAsync(ct);
+                return Results.Text(PlaybackService.RemoveApiKey(playlist), "application/vnd.apple.mpegurl");
+            }
+
+            http.Response.ContentType = upstream.Content.Headers.ContentType?.ToString() ?? "video/mp2t";
+            http.Response.ContentLength = upstream.Content.Headers.ContentLength;
+            await upstream.Content.CopyToAsync(http.Response.Body, ct);
+            return Results.Empty;
+        }
+        catch (JellyfinException)
+        {
+            return Results.StatusCode(StatusCodes.Status502BadGateway);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return Results.Empty; // The player moved on, which happens all the time when seeking.
+        }
+    }
+
+    /// <summary>Passes the original file through, so a capable player needs no transcoding at all.</summary>
+    public static async Task<IResult> RelayDirectAsync(
+        string playId, HttpContext http, PlaybackSessions sessions,
+        JellyfinConnectionStore connections, SettingsStore settings, JellyfinClient client)
+    {
+        if (sessions.Use(playId) is not { } session || connections.Get() is not { } connection)
+        {
+            return Results.NotFound();
+        }
+
+        var ct = http.RequestAborted;
+        var item = Uri.EscapeDataString(session.ItemId);
+        try
+        {
+            using var upstream = await client.OpenStreamAsync(
+                connection.BaseUrl, settings.GetOrCreateDeviceId(), connection.Token,
+                $"/Videos/{item}/stream?static=true&mediaSourceId={item}", ct,
+                http.Request.Headers.Range.FirstOrDefault());
+            if (!upstream.IsSuccessStatusCode)
+            {
+                return Results.StatusCode(StatusCodes.Status502BadGateway);
+            }
+
+            http.Response.StatusCode = (int)upstream.StatusCode;
+            http.Response.ContentType = upstream.Content.Headers.ContentType?.ToString() ?? "application/octet-stream";
+            http.Response.ContentLength = upstream.Content.Headers.ContentLength;
+            http.Response.Headers.AcceptRanges = "bytes";
+            http.Response.Headers.CacheControl = "no-store";
+            if (upstream.Content.Headers.ContentRange is { } contentRange)
+            {
+                http.Response.Headers.ContentRange = contentRange.ToString();
+            }
+
+            await upstream.Content.CopyToAsync(http.Response.Body, ct);
+            return Results.Empty;
+        }
+        catch (JellyfinException)
+        {
+            return Results.StatusCode(StatusCodes.Status502BadGateway);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return Results.Empty;
+        }
     }
 
     // Only the files that make up a stream, so this can't be used to reach anything else on Jellyfin.

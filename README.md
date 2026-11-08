@@ -108,6 +108,13 @@ to transcode and what to pass along as it is, so PrimeTime never needs FFmpeg or
 pass through PrimeTime on its way to your browser, which keeps your Jellyfin API key on the server and
 means viewers only need to reach PrimeTime. It uses that machine's network bandwidth, not its CPU.
 
+## Apps
+
+The server is ready for the native tvOS, iOS and iPadOS apps; their API is in [docs/app-api.md](docs/app-api.md).
+An app signs in by showing a QR code. Scan it, sign in to PrimeTime on your phone, and approve the
+device. Set `PRIMETIME_PUBLIC_URL` so the QR code points at the address your phone can reach. Linked apps can watch but can't change settings. See or remove them under
+*Settings → Devices*. Changing your password signs them out too.
+
 ## Scheduled tasks
 
 *Settings → Scheduled Tasks* controls background jobs: the **Library scan**, every 4 hours by
@@ -151,6 +158,7 @@ Set these in `.env` (see [.env.example](.env.example)):
 | `TZ`                  | `UTC`         | Time zone for logs (and, later, channel schedules)  |
 | `PRIMETIME_LOG_LEVEL` | `Information` | `Trace`, `Debug`, `Information`, `Warning`, `Error` |
 | `PRIMETIME_TRUSTED_PROXIES` | *(empty)* | IP addresses or CIDR ranges of reverse proxies to trust |
+| `PRIMETIME_PUBLIC_URL` | *(empty)* | The address people reach PrimeTime at; QR codes for the apps link here |
 
 Everything else (admin account, Jellyfin connection) is set in the web UI and stored in the
 `primetime-data` Docker volume.
