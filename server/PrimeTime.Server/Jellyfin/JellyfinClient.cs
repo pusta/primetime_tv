@@ -18,6 +18,13 @@ public sealed class JellyfinClient(HttpClient http)
     private const string ClientName = "PrimeTime";
     private const string DeviceName = "PrimeTime Server";
 
+    private const string IndexedItemFields = "Overview,Genres,Studios,Tags,SortName,DateCreated,ProviderIds";
+
+    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(15);
+
+    // A page of items with metadata can take much longer than a simple call on a slow server.
+    private static readonly TimeSpan ItemPageTimeout = TimeSpan.FromMinutes(2);
+
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     /// <summary>Unauthenticated: confirms the URL points at a Jellyfin server.</summary>
@@ -103,16 +110,50 @@ public sealed class JellyfinClient(HttpClient http)
         }
     }
 
+    /// <summary>
+    /// Fetches one page of a library's items of a single type (Movie, Series or Episode).
+    /// Virtual items, such as known-but-missing episodes, are excluded because they can't be played.
+    /// </summary>
+    public async Task<JellyfinMediaPage> GetItemsPageAsync(
+        string baseUrl, string deviceId, string token, string? userId,
+        string libraryId, string itemType, int startIndex, int limit, CancellationToken ct)
+    {
+        var url = $"{baseUrl}/Items?parentId={Uri.EscapeDataString(libraryId)}&recursive=true" +
+                  $"&includeItemTypes={itemType}&excludeLocationTypes=Virtual" +
+                  $"&fields={IndexedItemFields}&sortBy=SortName&sortOrder=Ascending" +
+                  $"&startIndex={startIndex}&limit={limit}&enableTotalRecordCount=true" +
+                  "&enableImages=false&enableUserData=false";
+        if (userId is not null)
+        {
+            url += $"&userId={Uri.EscapeDataString(userId)}";
+        }
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.TryAddWithoutValidation("Authorization", AuthHeader(deviceId, token));
+        try
+        {
+            return await SendAsync<JellyfinMediaPage>(request, ct, timeout: ItemPageTimeout)
+                   ?? new JellyfinMediaPage([], 0);
+        }
+        catch (JellyfinForbiddenException)
+        {
+            throw new JellyfinException("Jellyfin refused access to this library.");
+        }
+    }
+
     /// <summary>Ends a session created by AuthenticateByName (used after a test-only login).</summary>
     public async Task LogoutAsync(string baseUrl, string deviceId, string token, CancellationToken ct)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/Sessions/Logout");
         request.Headers.TryAddWithoutValidation("Authorization", AuthHeader(deviceId, token));
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(DefaultTimeout);
         try
         {
-            using var _ = await http.SendAsync(request, ct);
+            using var _ = await http.SendAsync(request, timeoutCts.Token);
         }
-        catch (HttpRequestException)
+        catch (Exception ex) when (ex is HttpRequestException ||
+                                   (ex is OperationCanceledException && !ct.IsCancellationRequested))
         {
             // Best effort; the session expires on its own.
         }
@@ -126,14 +167,17 @@ public sealed class JellyfinClient(HttpClient http)
     }
 
     private async Task<T?> SendAsync<T>(HttpRequestMessage request, CancellationToken ct,
-        string unauthorizedMessage = "Jellyfin rejected the credentials.")
+        string unauthorizedMessage = "Jellyfin rejected the credentials.", TimeSpan? timeout = null)
     {
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(timeout ?? DefaultTimeout);
+
         HttpResponseMessage response;
         try
         {
-            response = await http.SendAsync(request, ct);
+            response = await http.SendAsync(request, timeoutCts.Token);
         }
-        catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
+        catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
         {
             throw new JellyfinException("Timed out waiting for the Jellyfin server.", ex);
         }

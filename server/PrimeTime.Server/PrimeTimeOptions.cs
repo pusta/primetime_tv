@@ -13,7 +13,7 @@ public sealed class PrimeTimeOptions
         if (string.IsNullOrWhiteSpace(dataDir))
         {
             // Local `dotnet run` default; the container sets PRIMETIME_DATA_DIR=/data.
-            dataDir = Path.Combine(Environment.CurrentDirectory, "data");
+            dataDir = Path.Combine(Environment.CurrentDirectory, "local-data");
         }
 
         return new PrimeTimeOptions { DataDir = Path.GetFullPath(dataDir) };

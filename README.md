@@ -7,9 +7,9 @@ PrimeTime is a self-hosted service that sits next to [Jellyfin](https://jellyfin
 can tune in and see whatever is "on" instead of picking something to watch. Native apps for iPhone,
 iPad and Apple TV come later.
 
-> **Status: early scaffold.** Right now PrimeTime runs in Docker, gives you an admin web UI, and
-> connects to a Jellyfin server and lists its libraries. Channels, scheduling, the guide and playback
-> come next.
+> **Status: early.** Right now PrimeTime runs in Docker, gives you an admin web UI, connects to a
+> Jellyfin server, and keeps an index of the movies and shows in the libraries you choose. Channels,
+> scheduling, the guide and playback come next.
 
 ## Quick start
 
@@ -33,7 +33,33 @@ Open <http://localhost:8080> (or the port you set as `PRIMETIME_HTTP_PORT`).
      and doesn't store the password. An administrator account sees each library's folder paths; a
      regular account sees just the libraries it has access to.
 3. **Test connection** checks the details without saving them. **Save** checks them again and
-   stores them. The page then shows the server name and version and lists your libraries.
+   stores them. The page then shows the server name and version.
+4. **Choose your libraries.** Tick the libraries to include and choose **Confirm and scan**. Movie,
+   show and mixed libraries can be indexed. PrimeTime scans them right away and shows the progress.
+
+## The library index
+
+A scan reads each selected library from Jellyfin and stores its movies, shows and episodes in
+PrimeTime's database, ready for building channels. Episodes that Jellyfin knows about but has no
+file for are left out, since they can't be played.
+
+Each scan also removes items that are gone from Jellyfin. If a library fails to scan, or Jellyfin
+returns fewer items than it reported, PrimeTime keeps what it has for that library and tries again
+on the next scan.
+
+**Change libraries** on the Library page updates your selection. Leaving a library out removes its
+items from the index. Connecting a different Jellyfin server, or disconnecting, clears the selection
+and the whole index.
+
+## Scheduled tasks
+
+*Settings → Scheduled Tasks* controls background jobs. For now that's the **Library scan**, which
+runs every 4 hours by default. You can change the interval (15 minutes to 30 days), turn automatic
+runs off, start a run, stop one, and see the last 10 runs.
+
+The next run is counted from the end of the last one. Saving a shorter interval never starts a scan
+straight away. If PrimeTime was stopped when a scan was due, or was restarted partway through one,
+it scans again as soon as it's back up.
 
 ### Which URL to use
 
@@ -107,8 +133,10 @@ The container's Docker `HEALTHCHECK` calls it too.
 ├── server/
 │   └── PrimeTime.Server/     # backend API and web management UI
 │       ├── Program.cs        # startup: services, auth, middleware, routes
-│       ├── Endpoints/        # HTTP routes: /health, /api/session|setup|login|logout, /api/jellyfin
+│       ├── Endpoints/        # HTTP routes: /health, auth, /api/jellyfin, /api/libraries, /api/tasks
 │       ├── Jellyfin/         # Jellyfin API client and connection logic
+│       ├── Library/          # library selection and the scan task
+│       ├── Tasks/            # background task runner and scheduler
 │       ├── Data/             # SQLite access, schema migrations, stores
 │       ├── Security/         # password hashing
 │       └── wwwroot/          # management UI (plain HTML, CSS and JS; no build step)
@@ -137,7 +165,7 @@ cd server/PrimeTime.Server
 dotnet run --urls http://localhost:8080
 ```
 
-Local runs keep their data in `server/PrimeTime.Server/data/` (git-ignored). Set
+Local runs keep their data in `server/PrimeTime.Server/local-data/` (git-ignored). Set
 `PRIMETIME_DATA_DIR` to put it somewhere else.
 
 ## License

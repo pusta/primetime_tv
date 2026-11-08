@@ -1,14 +1,22 @@
 "use strict";
 
-// Small management UI: first-run setup, sign-in, and the Jellyfin connection.
+// Management UI: first-run setup, sign-in, the Jellyfin connection, library
+// selection and index status, and Settings → Scheduled Tasks.
 
 const $ = (selector, root = document) => root.querySelector(selector);
 
-const views = ["setup-view", "login-view", "dashboard-view"];
+const views = ["setup-view", "login-view", "dashboard-view", "settings-view"];
+const SCAN_TASK = "library-scan";
+const POLL_RUNNING_MS = 1500;
+const POLL_IDLE_MS = 30000;
 
 function show(viewId) {
   $("#loading").hidden = true;
   for (const id of views) $("#" + id).hidden = id !== viewId;
+}
+
+function isVisible(viewId) {
+  return !$("#" + viewId).hidden;
 }
 
 async function api(method, path, body) {
@@ -22,7 +30,8 @@ async function api(method, path, body) {
   if (response.status !== 204) {
     try { data = await response.json(); } catch { data = null; }
   }
-  if (response.status === 401 && path.startsWith("/api/jellyfin")) {
+  const signedInOnly = ["/api/jellyfin", "/api/libraries", "/api/tasks"].some((p) => path.startsWith(p));
+  if (response.status === 401 && signedInOnly) {
     await route();
     throw new Error("Your session expired. Sign in again.");
   }
@@ -43,18 +52,53 @@ async function busy(buttons, work) {
   try { return await work(); } finally { buttons.forEach((b) => (b.disabled = false)); }
 }
 
+function formatTime(value) {
+  return value
+    ? new Date(value).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
+    : "—";
+}
+
+function plural(count, noun) {
+  return `${count.toLocaleString()} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+function cell(text, className) {
+  const td = document.createElement("td");
+  td.textContent = text;
+  if (className) td.className = className;
+  return td;
+}
+
 // ---- Routing --------------------------------------------------------------
 
 async function route() {
   const session = await api("GET", "/api/session");
   $("#userbar").hidden = !session.authenticated;
+  $("#mainnav").hidden = !session.authenticated;
   $("#current-user").textContent = session.username ?? "";
 
   if (session.needsSetup) return show("setup-view");
   if (!session.authenticated) return show("login-view");
-  show("dashboard-view");
-  await loadDashboard();
+
+  const inSettings = location.hash.startsWith("#/settings");
+  for (const link of document.querySelectorAll("#mainnav a")) {
+    const active = link.dataset.section === (inSettings ? "settings" : "library");
+    link.classList.toggle("active", active);
+    if (active) link.setAttribute("aria-current", "page"); else link.removeAttribute("aria-current");
+  }
+
+  if (inSettings) {
+    show("settings-view");
+    taskCards.clear();
+    $("#tasks-list").replaceChildren();
+    await refreshTasks();
+  } else {
+    show("dashboard-view");
+    await loadDashboard();
+  }
 }
+
+window.addEventListener("hashchange", () => route().catch(() => {}));
 
 // ---- Setup and sign-in ----------------------------------------------------
 
@@ -119,26 +163,6 @@ function formPayload() {
     : { url: data.url, authMethod: "password", username: data.username, password: data.password };
 }
 
-function renderLibraries(libraries, note) {
-  const body = $("#libraries-body");
-  body.replaceChildren();
-  for (const lib of libraries) {
-    const row = document.createElement("tr");
-    const name = document.createElement("td");
-    name.textContent = lib.name;
-    const type = document.createElement("td");
-    type.textContent = lib.collectionType;
-    const paths = document.createElement("td");
-    paths.className = "paths";
-    paths.textContent = lib.locations.length ? lib.locations.join(", ") : "—";
-    row.append(name, type, paths);
-    body.append(row);
-  }
-  $("#libraries-empty").hidden = libraries.length > 0;
-  $("#libraries-note").textContent = note;
-  $("#libraries-card").hidden = false;
-}
-
 function renderStatus(status) {
   const badge = $("#conn-badge");
   const connected = status.connected;
@@ -147,10 +171,7 @@ function renderStatus(status) {
 
   $("#conn-summary").hidden = !status.configured;
   $("#disconnect-btn").hidden = !status.configured;
-  if (!status.configured) {
-    $("#libraries-card").hidden = true;
-    return;
-  }
+  if (!status.configured) return;
 
   $("#conn-name").textContent = status.server?.name ?? savedConnection?.serverName ?? "—";
   $("#conn-version").textContent = status.server?.version ?? savedConnection?.serverVersion ?? "—";
@@ -162,12 +183,6 @@ function renderStatus(status) {
   const error = $("#conn-error");
   error.hidden = connected;
   error.textContent = connected ? "" : status.error ?? "";
-
-  if (connected) {
-    renderLibraries(status.libraries, `${status.libraries.length} found`);
-  } else {
-    $("#libraries-card").hidden = true;
-  }
 }
 
 async function loadDashboard() {
@@ -182,6 +197,7 @@ async function loadDashboard() {
 
   $("#conn-badge").textContent = savedConnection.configured ? "Checking…" : "Not connected";
   renderStatus(await api("GET", "/api/jellyfin/status"));
+  await loadLibraries();
 }
 
 const jfButtons = () => [$("#test-btn"), $("#save-btn"), $("#disconnect-btn")];
@@ -191,9 +207,11 @@ $("#test-btn").addEventListener("click", async () => {
   setMessage(jfForm, null);
   try {
     const result = await busy(jfButtons(), () => api("POST", "/api/jellyfin/test", formPayload()));
+    const names = result.libraries.map((l) => l.name).join(", ");
     setMessage(jfForm, "success",
-      `Connected to ${result.server.name} (Jellyfin ${result.server.version}). Not saved yet.`);
-    renderLibraries(result.libraries, `${result.libraries.length} found (test, not saved)`);
+      `Connected to ${result.server.name} (Jellyfin ${result.server.version}). ` +
+      `Found ${result.libraries.length} ${result.libraries.length === 1 ? "library" : "libraries"}` +
+      `${names ? `: ${names}` : ""}. Not saved yet.`);
   } catch (err) {
     setMessage(jfForm, "error", err.message);
   }
@@ -214,15 +232,349 @@ jfForm.addEventListener("submit", async (event) => {
 });
 
 $("#disconnect-btn").addEventListener("click", async () => {
-  if (!confirm("Remove the saved Jellyfin connection?")) return;
+  if (!confirm("Remove the saved Jellyfin connection? This also clears the library selection and the index.")) return;
   try {
     await busy(jfButtons(), () => api("DELETE", "/api/jellyfin"));
     jfForm.reset();
+    pickerOpen = false;
     await loadDashboard();
   } catch (err) {
     setMessage(jfForm, "error", err.message);
   }
 });
+
+// ---- Library selection and index -------------------------------------------
+
+const libraryForm = $("#library-form");
+let libraries = null;
+let pickerOpen = false;
+
+const TYPE_LABELS = {
+  movies: "Movies", tvshows: "Shows", mixed: "Mixed", music: "Music", musicvideos: "Music videos",
+  homevideos: "Home videos", boxsets: "Collections", books: "Books", photos: "Photos",
+  livetv: "Live TV", playlists: "Playlists",
+};
+
+const typeLabel = (type) => TYPE_LABELS[type] ?? type;
+
+async function loadLibraries() {
+  libraries = await api("GET", "/api/libraries");
+  renderLibraries();
+  await refreshTasks();
+}
+
+function renderLibraries() {
+  const showCard = libraries.configured && (libraries.reachable || libraries.selectionConfirmed);
+  $("#libraries-card").hidden = !showCard;
+  if (!showCard) return;
+
+  const picking = libraries.reachable && (!libraries.selectionConfirmed || pickerOpen);
+  libraryForm.hidden = !picking;
+  $("#library-index").hidden = picking;
+  $("#library-cancel").hidden = !libraries.selectionConfirmed;
+
+  if (picking) {
+    renderPicker();
+  } else {
+    renderIndex();
+  }
+}
+
+function renderPicker() {
+  setMessage(libraryForm, null);
+  $("#libraries-note").textContent = "";
+  const list = $("#library-options");
+  list.replaceChildren();
+
+  for (const library of libraries.libraries.filter((l) => l.available)) {
+    const item = document.createElement("li");
+    const label = document.createElement("label");
+    if (!library.supported) label.className = "unsupported";
+
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.value = library.id;
+    box.disabled = !library.supported;
+    // First time through, start with everything that can be indexed ticked.
+    box.checked = library.supported && (library.selected || !libraries.selectionConfirmed);
+
+    const text = document.createElement("span");
+    text.textContent = library.name;
+    const detail = document.createElement("small");
+    detail.textContent = library.supported
+      ? [typeLabel(library.collectionType), ...library.locations].join(" · ")
+      : `${typeLabel(library.collectionType)} · PrimeTime only indexes movies and shows`;
+    text.append(detail);
+
+    label.append(box, text);
+    item.append(label);
+    list.append(item);
+  }
+}
+
+function renderIndex() {
+  const selected = libraries.libraries.filter((l) => l.selected);
+  const body = $("#libraries-body");
+  body.replaceChildren();
+
+  for (const library of selected) {
+    const row = document.createElement("tr");
+    let scanned = library.lastScannedAt ? formatTime(library.lastScannedAt) : "Not yet";
+    let scannedClass = "";
+    if (library.lastScanError) { scanned = library.lastScanError; scannedClass = "warn"; }
+    if (!library.available) { scanned = "No longer on the Jellyfin server"; scannedClass = "warn"; }
+    row.append(
+      cell(library.name),
+      cell(typeLabel(library.collectionType)),
+      cell(library.movies.toLocaleString(), "num"),
+      cell(library.shows.toLocaleString(), "num"),
+      cell(library.episodes.toLocaleString(), "num"),
+      cell(scanned, scannedClass),
+    );
+    body.append(row);
+  }
+
+  const sum = (key) => selected.reduce((total, l) => total + l[key], 0);
+  $("#libraries-note").textContent =
+    `${plural(sum("movies"), "movie")} · ${plural(sum("shows"), "show")} · ${plural(sum("episodes"), "episode")}`;
+
+  const excluded = libraries.libraries.filter((l) => !l.selected && l.supported && l.available);
+  $("#libraries-excluded").hidden = excluded.length === 0;
+  $("#libraries-excluded").textContent = `Not included: ${excluded.map((l) => l.name).join(", ")}.`;
+  $("#library-change").hidden = !libraries.reachable;
+}
+
+libraryForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const checked = [...$("#library-options").querySelectorAll("input:checked")].map((box) => box.value);
+  if (checked.length === 0) return setMessage(libraryForm, "error", "Select at least one library.");
+
+  const dropped = libraries.libraries.filter((l) => l.selected && !checked.includes(l.id));
+  if (dropped.length > 0 &&
+      !confirm(`Remove ${dropped.map((l) => l.name).join(", ")} from the index?`)) return;
+
+  try {
+    await busy([$('button[type="submit"]', libraryForm)],
+      () => api("PUT", "/api/libraries/selection", { libraryIds: checked }));
+    pickerOpen = false;
+    await loadLibraries();
+  } catch (err) {
+    setMessage(libraryForm, "error", err.message);
+  }
+});
+
+$("#library-change").addEventListener("click", () => {
+  pickerOpen = true;
+  renderLibraries();
+});
+
+$("#library-cancel").addEventListener("click", () => {
+  pickerOpen = false;
+  renderLibraries();
+});
+
+// ---- Tasks and scan status --------------------------------------------------
+
+const STATUS_LABELS = {
+  running: "Running", succeeded: "Succeeded", partial: "Finished with errors", failed: "Failed",
+  cancelled: "Stopped", interrupted: "Interrupted",
+};
+const TRIGGER_LABELS = {
+  initial: "First scan", selection: "Libraries changed", manual: "Manual", scheduled: "Scheduled",
+};
+
+let tasksState = null;
+let pollTimer = null;
+const taskCards = new Map();
+
+function progressText(running) {
+  const count = running.total != null
+    ? ` (${running.processed.toLocaleString()} of ${running.total.toLocaleString()})`
+    : "";
+  return `${running.message ?? "Working…"}${count}`;
+}
+
+function nextRunText(task) {
+  if (task.running) return "After this run finishes";
+  if (task.notReadyReason) return task.notReadyReason;
+  if (!task.enabled) return "Off. Runs only when you start it.";
+  if (!task.nextRunAt) return "Not scheduled yet";
+  return new Date(task.nextRunAt) <= new Date() ? "Any moment now" : formatTime(task.nextRunAt);
+}
+
+function lastRunText(run) {
+  if (!run) return "Never";
+  return `${formatTime(run.finishedAt ?? run.startedAt)}: ${STATUS_LABELS[run.status] ?? run.status}`;
+}
+
+async function refreshTasks() {
+  clearTimeout(pollTimer);
+  const wasRunning = tasksState?.tasks.some((t) => t.running) ?? false;
+  try {
+    tasksState = await api("GET", "/api/tasks");
+  } catch {
+    return; // Signed out or server gone; route() or the next page load takes over.
+  }
+  const running = tasksState.tasks.some((t) => t.running);
+
+  renderScanStatus();
+  renderTasks();
+
+  if (wasRunning && !running && isVisible("dashboard-view")) {
+    await loadLibraries();
+    return;
+  }
+  if (isVisible("dashboard-view") || isVisible("settings-view")) {
+    pollTimer = setTimeout(refreshTasks, running ? POLL_RUNNING_MS : POLL_IDLE_MS);
+  }
+}
+
+function renderScanStatus() {
+  const task = tasksState.tasks.find((t) => t.key === SCAN_TASK);
+  if (!task) return;
+
+  const lastRun = task.running ? null : task.recentRuns[0];
+  const status = $("#scan-status");
+  status.classList.toggle("running", Boolean(task.running));
+  if (task.running) {
+    status.textContent = `Scanning: ${progressText(task.running)}`;
+  } else if (lastRun) {
+    const next = task.enabled && !task.notReadyReason ? ` Next scan: ${nextRunText(task)}.` : "";
+    status.textContent = `${lastRunText(lastRun)}. ${lastRun.summary ?? ""}${next}`;
+  } else {
+    status.textContent = "No scan has run yet.";
+  }
+
+  const error = $("#scan-error");
+  error.hidden = !lastRun?.error;
+  error.textContent = lastRun?.error ?? "";
+
+  $("#scan-now").hidden = Boolean(task.running);
+  $("#scan-cancel").hidden = !task.running;
+}
+
+$("#scan-now").addEventListener("click", () => runTask(SCAN_TASK, (message) => {
+  const error = $("#scan-error");
+  error.hidden = false;
+  error.textContent = message;
+}));
+
+$("#scan-cancel").addEventListener("click", () => cancelTask(SCAN_TASK));
+
+async function runTask(key, onError) {
+  try {
+    await api("POST", `/api/tasks/${key}/run`);
+    await refreshTasks();
+  } catch (err) {
+    onError(err.message);
+  }
+}
+
+async function cancelTask(key) {
+  try {
+    await api("POST", `/api/tasks/${key}/cancel`);
+  } catch {
+    // It finished on its own; the refresh below shows that.
+  }
+  await refreshTasks();
+}
+
+function intervalParts(minutes) {
+  if (minutes % 1440 === 0) return { every: minutes / 1440, unit: "1440" };
+  if (minutes % 60 === 0) return { every: minutes / 60, unit: "60" };
+  return { every: minutes, unit: "1" };
+}
+
+function buildTaskCard(task) {
+  const card = $("#task-template").content.firstElementChild.cloneNode(true);
+  $('[data-field="name"]', card).textContent = task.name;
+  $('[data-field="description"]', card).textContent = task.description;
+
+  const form = $("form", card);
+  const fillForm = (source) => {
+    const { every, unit } = intervalParts(source.intervalMinutes);
+    form.elements.enabled.checked = source.enabled;
+    form.elements.every.value = every;
+    form.elements.unit.value = unit;
+  };
+  fillForm(task);
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    setMessage(form, null);
+    const intervalMinutes = Number(form.elements.every.value) * Number(form.elements.unit.value);
+    if (!Number.isInteger(intervalMinutes) ||
+        intervalMinutes < tasksState.minIntervalMinutes || intervalMinutes > tasksState.maxIntervalMinutes) {
+      return setMessage(form, "error", "Choose an interval between 15 minutes and 30 days.");
+    }
+    try {
+      const saved = await busy([$('button[type="submit"]', form)], () => api("PUT", `/api/tasks/${task.key}`, {
+        enabled: form.elements.enabled.checked,
+        intervalMinutes,
+      }));
+      fillForm(saved);
+      await refreshTasks();
+      setMessage(form, "success", "Schedule saved.");
+    } catch (err) {
+      setMessage(form, "error", err.message);
+    }
+  });
+
+  $('[data-action="run"]', card).addEventListener("click", () => {
+    setMessage(form, null);
+    runTask(task.key, (message) => setMessage(form, "error", message));
+  });
+  $('[data-action="cancel"]', card).addEventListener("click", () => cancelTask(task.key));
+
+  $("#tasks-list").append(card);
+  taskCards.set(task.key, card);
+  return card;
+}
+
+function renderTasks() {
+  if (!isVisible("settings-view")) return;
+
+  for (const task of tasksState.tasks) {
+    const card = taskCards.get(task.key) ?? buildTaskCard(task);
+    const field = (name) => $(`[data-field="${name}"]`, card);
+
+    const state = field("state");
+    const on = task.enabled && !task.notReadyReason;
+    state.textContent = task.running ? "Running" : task.notReadyReason ? "Waiting" : task.enabled ? "On" : "Off";
+    state.classList.toggle("ok", Boolean(task.running) || on);
+
+    field("next").textContent = nextRunText(task);
+    const finished = task.recentRuns.find((r) => r.status !== "running");
+    field("last").textContent = finished
+      ? `${lastRunText(finished)}${finished.summary ? `. ${finished.summary}` : ""}`
+      : "Never";
+
+    const progress = field("progress");
+    progress.hidden = !task.running;
+    progress.classList.toggle("running", Boolean(task.running));
+    progress.textContent = task.running ? progressText(task.running) : "";
+
+    $('[data-action="run"]', card).hidden = Boolean(task.running);
+    $('[data-action="run"]', card).disabled = Boolean(task.notReadyReason);
+    $('[data-action="cancel"]', card).hidden = !task.running;
+
+    const rows = field("runs");
+    rows.replaceChildren();
+    for (const run of task.recentRuns) {
+      const row = document.createElement("tr");
+      const failed = run.status === "failed" || run.status === "partial";
+      row.append(
+        cell(formatTime(run.startedAt)),
+        cell(TRIGGER_LABELS[run.trigger] ?? run.trigger),
+        cell(STATUS_LABELS[run.status] ?? run.status, failed ? "warn" : ""),
+        cell([run.summary, run.error].filter(Boolean).join(" ") || "—"),
+      );
+      rows.append(row);
+    }
+    field("no-runs").hidden = task.recentRuns.length > 0;
+    rows.closest("table").hidden = task.recentRuns.length === 0;
+  }
+}
 
 route().catch((err) => {
   $("#loading").textContent = `Couldn't reach the PrimeTime server: ${err.message}`;
