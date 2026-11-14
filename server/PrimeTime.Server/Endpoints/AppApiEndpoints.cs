@@ -11,7 +11,7 @@ public sealed record DeviceStartRequest(string? DeviceName, string? Platform);
 
 public sealed record DeviceTokenRequest(string? DeviceCode);
 
-public sealed record AppPlayRequest(string? Player);
+public sealed record AppPlayRequest(string? Player, int? AudioStreamIndex);
 
 /// <summary>
 /// The stable API for the native apps; see docs/app-api.md. App tokens can watch but never
@@ -147,20 +147,21 @@ public static class AppApiEndpoints
         signedIn.MapPost("/channels/{id:long}/play", async (
             long id, AppPlayRequest? body, PlaybackService playback, CancellationToken ct) =>
         {
-            var profile = body?.Player switch
+            AppPlayer? player = body?.Player switch
             {
-                null or "native" => StreamProfile.Compatible,
-                "mpv" => StreamProfile.Mpv,
+                null or "native" => AppPlayer.Native,
+                "mpv" => AppPlayer.Mpv,
+                "auto" => AppPlayer.Auto,
                 _ => null,
             };
-            if (profile is null)
+            if (player is null || body?.AudioStreamIndex < 0)
             {
-                return Results.BadRequest(new { error = "invalid_player" });
+                return Results.BadRequest(new { error = player is null ? "invalid_player" : "invalid_audio" });
             }
 
             try
             {
-                var (channel, start) = await playback.StartAsync(id, profile, ct);
+                var (channel, start) = await playback.StartAsync(id, player.Value, body?.AudioStreamIndex, ct);
                 if (channel is null)
                 {
                     return Results.NotFound(new { error = "not_found" });
@@ -176,7 +177,28 @@ public static class AppApiEndpoints
                 {
                     playId = start.Session.Id,
                     hlsUrl = $"{stream}/master.m3u8",
-                    directUrl = $"{stream}/direct",
+                    directUrl = start.Player == AppPlayer.Mpv ? $"{stream}/direct" : null,
+                    player = start.Player == AppPlayer.Native ? "native" : "mpv",
+                    video = start.Source.Video is { } video
+                        ? new
+                        {
+                            codec = video.Codec,
+                            range = video.VideoRangeType ?? video.VideoRange,
+                            width = video.Width,
+                            height = video.Height,
+                        }
+                        : null,
+                    audioStreamIndex = start.AudioStreamIndex,
+                    audioTracks = start.Source.AudioStreams.Select(a => new
+                    {
+                        index = a.Index,
+                        language = a.Language,
+                        title = a.Title,
+                        displayTitle = a.DisplayTitle,
+                        codec = a.Codec,
+                        channels = a.Channels,
+                        isDefault = a.IsDefault,
+                    }),
                     now = start.Now,
                     offsetSeconds = start.Now - start.Program.StartTs,
                     channel = DescribeChannel(channel),

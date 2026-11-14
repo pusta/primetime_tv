@@ -169,7 +169,10 @@ public static partial class PlaybackEndpoints
         }
     }
 
-    // Only the files that make up a stream, so this can't be used to reach anything else on Jellyfin.
-    [GeneratedRegex(@"\A(master\.m3u8|main\.m3u8|hls1/[A-Za-z0-9_-]+/\d+\.(ts|mp4|m4s))\z")]
+    // Only the files that make up a stream, so this can't be used to reach anything else on Jellyfin:
+    // the playlists, the segments (an fMP4 stream starts with "-1.mp4"), and the text subtitles Jellyfin
+    // lists in the playlist for players that show them themselves.
+    [GeneratedRegex(@"\A(master\.m3u8|main\.m3u8|hls1/[A-Za-z0-9_-]+/-?\d+\.(ts|mp4|m4s)|" +
+                    @"[A-Za-z0-9-]+/Subtitles/\d+/(subtitles\.m3u8|[Ss]tream\.vtt))\z")]
     private static partial Regex StreamFile();
 }

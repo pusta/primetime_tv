@@ -67,13 +67,33 @@ App tokens can only watch. They can't reach the admin API, and web sign-in cooki
 
 ## Playing a channel
 
-`POST /channels/{id}/play` with `{ "player": "mpv" }`, or `"native"` for `AVPlayer`:
+`POST /channels/{id}/play` with a `player`:
+
+- **`"auto"`** (recommended): the server looks at the program's video. HDR10, HDR10+, HLG and Dolby
+  Vision in HEVC get a `native` stream, and everything else an `mpv` stream, including HDR in AV1 or
+  VP9, which Apple's player would need converted. The response says which.
+- **`"mpv"`**: for mpv, which decodes nearly anything.
+- **`"native"`** (the default): for `AVPlayer`. HEVC and H.264 are copied untouched into
+  fragmented-MP4 HLS, which is how Apple devices play HDR and Dolby Vision. Anything else Apple can't
+  decode is transcoded to H.264. Dolby Vision profile 7 isn't in the list Jellyfin is given; recent
+  Jellyfin versions send its HDR10 base layer, and with older ones the stream may not play, so an app
+  should fall back to `"mpv"` if a `native` stream fails to start.
+
+Add `"audioStreamIndex"` to choose the audio for a `native` stream, which carries only one. Use an
+`index` from `audioTracks`.
 
 ```json
 {
   "playId": "...",
+  "player": "native",
   "hlsUrl": "/api/app/v1/play/.../master.m3u8",
-  "directUrl": "/api/app/v1/play/.../direct",
+  "directUrl": null,
+  "video": { "codec": "hevc", "range": "DOVIWithHDR10", "width": 3840, "height": 2160 },
+  "audioStreamIndex": 1,
+  "audioTracks": [
+    { "index": 1, "language": "eng", "title": null, "displayTitle": "English - TrueHD - 7.1",
+      "codec": "truehd", "channels": 8, "isDefault": true }
+  ],
   "now": 1794171000,
   "offsetSeconds": 1560,
   "channel": { "id": 1, "number": 1, "name": "Movies", "color": "#3d9be9", "logoUrl": null },
@@ -81,20 +101,25 @@ App tokens can only watch. They can't reach the admin API, and web sign-in cooki
 }
 ```
 
+`video.range` is Jellyfin's name for it, such as `SDR`, `HDR10`, `HLG`, `DOVI` or `DOVIWithHDR10`.
+`audioTracks` lists every audio stream in the file; Jellyfin transcodes one the player can't decode,
+such as TrueHD or DTS, to E-AC-3.
+
 `409 nothing_on_air` means nothing is scheduled right now. `502 jellyfin_error` includes a `message`.
+`400 invalid_player` means the server doesn't know that player. A server from before `"auto"` answers
+that way, so an app can fall back to `"mpv"`.
 
 The stream URLs are relative to the server and need no token, because the long random ID is the
 credential. Treat them as secrets, and don't log them.
 
 Which URL to use:
 
-- **`hlsUrl`**: the same way the website plays. Jellyfin passes along what the player can decode and
-  transcodes the rest. With `"mpv"`, H.264, HEVC, AAC, AC3, E-AC3 and MP3 pass through untouched.
+- **`hlsUrl`**: Jellyfin's HLS stream. Jellyfin passes along what the player can decode and transcodes
+  the rest. A `native` stream lists the file's text subtitles as HLS subtitle tracks, with none chosen.
 - **`directUrl`**: the original file, with byte-range seeking and no Jellyfin transcoding at all. Only
-  for mpv, and the best choice for formats Jellyfin struggles to convert. Try this first with mpv and
-  fall back to `hlsUrl`.
+  for `mpv` streams, and null otherwise. Try this first with mpv and fall back to `hlsUrl`.
 
-**Join live:** start at `offsetSeconds` (with mpv, `--start=<offset>`). Compute the offset again from
+**Join live:** start at `offsetSeconds` (with mpv, `--start=<offset>`; with `AVPlayer`, seek there once the item is ready). Compute the offset again from
 `now` if there's a delay before playback begins.
 
 **Start from Beginning:** seek to `0`. **Back to Live:** seek to `now - program.start`, adjusted for the

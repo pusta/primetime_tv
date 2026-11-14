@@ -77,7 +77,17 @@ public sealed record ProgramInfo(
     IReadOnlyList<string> Directors,
     IReadOnlyList<ProgramCredit> Cast);
 
-public sealed record PlayStart(PlaybackSession Session, Channel Channel, ScheduleEntry Program, long Now);
+/// <param name="Player">The player the stream was made for, when an app asked; null for the website.</param>
+/// <param name="Source">The program's file as Jellyfin describes it, with its video and audio streams.</param>
+/// <param name="AudioStreamIndex">The audio stream in the HLS stream, which carries only one.</param>
+public sealed record PlayStart(
+    PlaybackSession Session,
+    Channel Channel,
+    ScheduleEntry Program,
+    long Now,
+    AppPlayer? Player,
+    JellyfinMediaSource Source,
+    int? AudioStreamIndex);
 
 /// <summary>Asks Jellyfin to stream what's on air. Jellyfin does any transcoding; PrimeTime only passes it on.</summary>
 public sealed partial class PlaybackService(
@@ -93,9 +103,24 @@ public sealed partial class PlaybackService(
     private static readonly TimeSpan IdleLimit = TimeSpan.FromMinutes(5);
     private const int CastShown = 8;
 
+    /// <summary>Starts a stream for the website. See the other overload.</summary>
+    public Task<(Channel? Channel, PlayStart? Start)> StartAsync(
+        long channelId, StreamProfile profile, CancellationToken ct) =>
+        StartAsync(channelId, profile, null, null, ct);
+
+    /// <summary>
+    /// Starts a stream for an app. With Auto, HDR and Dolby Vision programs in HEVC go to Apple's player,
+    /// which shows them as intended, and everything else to mpv. <paramref name="audioStreamIndex"/> picks the
+    /// audio for an HLS stream, which carries only one.
+    /// </summary>
+    public Task<(Channel? Channel, PlayStart? Start)> StartAsync(
+        long channelId, AppPlayer player, int? audioStreamIndex, CancellationToken ct) =>
+        StartAsync(channelId, player == AppPlayer.Native ? StreamProfile.Native : StreamProfile.Mpv,
+            player, audioStreamIndex, ct);
+
     /// <summary>Returns null if the channel doesn't exist, or a null program if nothing is on air.</summary>
-    public async Task<(Channel? Channel, PlayStart? Start)> StartAsync(
-        long channelId, StreamProfile profile, CancellationToken ct)
+    private async Task<(Channel? Channel, PlayStart? Start)> StartAsync(
+        long channelId, StreamProfile profile, AppPlayer? player, int? audioStreamIndex, CancellationToken ct)
     {
         await StopIdleAsync(ct);
 
@@ -119,25 +144,58 @@ public sealed partial class PlaybackService(
                      ?? throw new JellyfinException("Jellyfin has no administrator account to play this as.");
 
         var info = await client.GetPlaybackInfoAsync(
-            connection.BaseUrl, deviceId, connection.Token, program.ItemId, userId, profile, ct);
-        var url = info.MediaSources?.FirstOrDefault()?.TranscodingUrl;
+            connection.BaseUrl, deviceId, connection.Token, program.ItemId, userId, profile, ct, audioStreamIndex);
+        if (player == AppPlayer.Auto)
+        {
+            // Asking costs nothing until the stream is fetched, so ask again for Apple's player if it's HDR.
+            player = AppPlayer.Mpv;
+            if (info.MediaSources?.FirstOrDefault() is { IsAppleHdr: true })
+            {
+                profile = StreamProfile.Native;
+                player = AppPlayer.Native;
+                info = await client.GetPlaybackInfoAsync(
+                    connection.BaseUrl, deviceId, connection.Token, program.ItemId, userId, profile, ct,
+                    audioStreamIndex);
+            }
+        }
+
+        var source = info.MediaSources?.FirstOrDefault();
+        var url = source?.TranscodingUrl;
         var separator = url?.IndexOf('?') ?? -1;
         var path = separator > 0 ? url![..separator] : "";
-        if (!path.StartsWith('/') || !path.EndsWith("/master.m3u8", StringComparison.Ordinal) ||
+        if (source is null || !path.StartsWith('/') || !path.EndsWith("/master.m3u8", StringComparison.Ordinal) ||
             string.IsNullOrEmpty(info.PlaySessionId))
         {
             throw new JellyfinException("Jellyfin couldn't offer a stream for this program.");
+        }
+
+        var query = RemoveApiKey(url![separator..]);
+        if (profile.SubtitlesInManifest && !query.Contains("EnableSubtitlesInManifest=", StringComparison.OrdinalIgnoreCase))
+        {
+            query += "&EnableSubtitlesInManifest=true";
         }
 
         var session = new PlaybackSession(
             RandomNumberGenerator.GetHexString(32, lowercase: true),
             program.ItemId,
             path[..path.LastIndexOf('/')],
-            RemoveApiKey(url![separator..]),
+            query,
             info.PlaySessionId);
         sessions.Add(session);
-        return (channel, new PlayStart(session, channel, program, now));
+        return (channel, new PlayStart(
+            session, channel, program, now, player, source,
+            audioStreamIndex ?? AudioIndexIn(query) ?? source.DefaultAudioStreamIndex));
     }
+
+    /// <summary>The audio stream Jellyfin chose, from the stream URL it made.</summary>
+    private static int? AudioIndexIn(string query) =>
+        AudioStreamIndexParameter().Match(query) is { Success: true } match &&
+        int.TryParse(match.Groups[1].Value, out var index)
+            ? index
+            : null;
+
+    [GeneratedRegex("""(?i)[?&]AudioStreamIndex=(\d+)""")]
+    private static partial Regex AudioStreamIndexParameter();
 
     /// <summary>Asks Jellyfin about the program a stream is playing. Null if the stream or item has gone.</summary>
     public async Task<ProgramInfo?> GetInfoAsync(string playId, CancellationToken ct)
