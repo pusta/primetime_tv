@@ -200,7 +200,7 @@ public sealed class JellyfinClient(HttpClient http)
     /// </summary>
     public async Task<JellyfinPlaybackInfo> GetPlaybackInfoAsync(
         string baseUrl, string deviceId, string token, string itemId, string userId,
-        StreamProfile profile, CancellationToken ct)
+        StreamProfile profile, CancellationToken ct, int? audioStreamIndex = null)
     {
         using var request = new HttpRequestMessage(
             HttpMethod.Post, $"{baseUrl}/Items/{Uri.EscapeDataString(itemId)}/PlaybackInfo");
@@ -210,6 +210,10 @@ public sealed class JellyfinClient(HttpClient http)
             {
                 UserId = userId,
                 MediaSourceId = itemId,
+                AudioStreamIndex = audioStreamIndex,
+                // -1 picks no subtitle, so Jellyfin never burns one into the picture, which would mean
+                // transcoding the video. Players that show subtitles themselves choose one later.
+                SubtitleStreamIndex = profile.SubtitlesInManifest ? -1 : (int?)null,
                 DeviceProfile = new
                 {
                     MaxStreamingBitrate = profile.MaxBitrate,
@@ -217,7 +221,7 @@ public sealed class JellyfinClient(HttpClient http)
                     {
                         new
                         {
-                            Container = "ts",
+                            Container = profile.Container,
                             Type = "Video",
                             VideoCodec = profile.VideoCodecs,
                             AudioCodec = profile.AudioCodecs,
@@ -228,6 +232,7 @@ public sealed class JellyfinClient(HttpClient http)
                             BreakOnNonKeyFrames = true,
                         },
                     },
+                    CodecProfiles = CodecProfiles(profile),
                 },
             }),
             System.Text.Encoding.UTF8,
@@ -235,6 +240,35 @@ public sealed class JellyfinClient(HttpClient http)
         return await SendAsync<JellyfinPlaybackInfo>(request, ct, timeout: ItemPageTimeout)
                ?? throw new JellyfinException("Jellyfin returned no playback details.");
     }
+
+    /// <summary>
+    /// Tells Jellyfin which HDR formats the player shows, so it copies them rather than converting the
+    /// picture. 10-bit H.264 is rare, and Apple's decoder can't play it, so that is converted instead.
+    /// </summary>
+    private static object[] CodecProfiles(StreamProfile profile) => profile.HevcRangeTypes is not { } rangeTypes
+        ? []
+        :
+        [
+            new
+            {
+                Type = "Video",
+                Codec = "hevc",
+                Conditions = new[]
+                {
+                    new { Condition = "EqualsAny", Property = "VideoRangeType", Value = rangeTypes, IsRequired = false },
+                },
+            },
+            new
+            {
+                Type = "Video",
+                Codec = "h264",
+                Conditions = new[]
+                {
+                    new { Condition = "EqualsAny", Property = "VideoRangeType", Value = "SDR", IsRequired = false },
+                    new { Condition = "LessThanEqual", Property = "VideoBitDepth", Value = "8", IsRequired = false },
+                },
+            },
+        ];
 
     /// <summary>Opens a stream file. The caller reads the body and disposes the response.</summary>
     public async Task<HttpResponseMessage> OpenStreamAsync(
