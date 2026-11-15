@@ -59,11 +59,42 @@ App tokens can only watch. They can't reach the admin API, and web sign-in cooki
 | `GET /channels`                    | Channels: `id`, `number`, `name`, `color`, `logoUrl` |
 | `GET /channels/{id}/logo?v=`       | The logo image. The URL changes when the logo does  |
 | `GET /guide?from=&to=`             | Programs per channel, for up to 48 hours            |
+| `GET /channels/{id}/programs/{start}` | One guide program's details; see below          |
 | `POST /channels/{id}/play`         | Tune in; see below                                  |
 | `GET /play/{playId}/info`          | Description, cast and other details                 |
 
 `logoUrl` is `null` for a channel with no logo, and needs the token, so fetch it with `URLSession`.
 `color` is a hex string such as `#3d9be9`.
+
+## Program details
+
+`GET /channels/{id}/programs/{start}`, where `start` is a program's `start` from the guide, describes
+that program from the server's own index, without asking Jellyfin, so it's quick enough to call for
+whichever program has focus:
+
+```json
+{
+  "type": "episode",
+  "title": "Pokémon",
+  "subtitle": "S9 E10 · The Green Guardian",
+  "start": 1794171000,
+  "end": 1794172260,
+  "season": 9,
+  "episode": 10,
+  "episodeTitle": "The Green Guardian",
+  "year": 2005,
+  "officialRating": "TV-Y7",
+  "communityRating": 7.4,
+  "overview": "On their way to the Battle Pike, Ash and his friends…",
+  "genres": ["Adventure", "Animation"]
+}
+```
+
+For an episode, `title` is the show, `year` is when the episode aired (or the show's year), and the
+rating and genres are the show's. An episode with no overview of its own gets the show's. Movies have
+no `season`, `episode` or `episodeTitle`. Anything the index doesn't know is `null`, and `genres` is
+empty. `404 not_found` means nothing on that channel starts at that time, often because the schedule
+moved on; ask the guide again.
 
 ## Playing a channel
 

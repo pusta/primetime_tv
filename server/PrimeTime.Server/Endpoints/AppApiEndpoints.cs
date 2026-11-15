@@ -144,6 +144,35 @@ public static class AppApiEndpoints
             });
         });
 
+        // What the guide shows about one program, from the local index, so it's quick enough to ask
+        // for whichever program has focus.
+        signedIn.MapGet("/channels/{id:long}/programs/{start:long}", (
+            long id, long start, ScheduleStore schedule, MediaIndexStore index) =>
+        {
+            if (schedule.At(id, start) is not { } entry)
+            {
+                return Results.NotFound(new { error = "not_found" });
+            }
+
+            var details = index.Describe(entry.ItemType, entry.ItemId);
+            return Results.Ok(new
+            {
+                type = entry.ItemType,
+                title = entry.Title,
+                subtitle = entry.Subtitle,
+                start = entry.StartTs,
+                end = entry.EndTs,
+                season = entry.Season,
+                episode = entry.Episode,
+                episodeTitle = details?.EpisodeTitle,
+                year = details?.Year,
+                officialRating = details?.OfficialRating,
+                communityRating = details?.CommunityRating,
+                overview = details?.Overview,
+                genres = details?.Genres ?? [],
+            });
+        });
+
         signedIn.MapPost("/channels/{id:long}/play", async (
             long id, AppPlayRequest? body, PlaybackService playback, CancellationToken ct) =>
         {

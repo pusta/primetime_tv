@@ -175,6 +175,25 @@ public sealed class ScheduleStore(Database database)
         return reader.Read() ? ReadEntry(reader) : null;
     }
 
+    /// <summary>The program a channel airs starting at exactly this time, if there is one.</summary>
+    public ScheduleEntry? At(long channelId, long startTs)
+    {
+        using var connection = database.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT channel_id, item_type, item_id, show_id, season_number, episode_number,
+                   title, subtitle, cycle, start_ts, end_ts
+            FROM schedule_entries
+            WHERE channel_id = $id AND start_ts = $start
+            LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$id", channelId);
+        command.Parameters.AddWithValue("$start", startTs);
+
+        using var reader = command.ExecuteReader();
+        return reader.Read() ? ReadEntry(reader) : null;
+    }
+
     public IReadOnlyList<ScheduleEntry> Range(long from, long to)
     {
         using var connection = database.Open();
