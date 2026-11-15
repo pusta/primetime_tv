@@ -4,6 +4,17 @@ using PrimeTime.Server.Jellyfin;
 
 namespace PrimeTime.Server.Data;
 
+/// <summary>What the guide shows about a program, from the local index.</summary>
+/// <param name="EpisodeTitle">For an episode, its own title; the schedule's title is the show's.</param>
+/// <param name="Year">An episode's air year, or its show's when unknown.</param>
+public sealed record ProgramDetails(
+    string? EpisodeTitle,
+    int? Year,
+    string? OfficialRating,
+    double? CommunityRating,
+    string? Overview,
+    IReadOnlyList<string> Genres);
+
 /// <summary>
 /// The local index of movies, shows and episodes. Each row remembers the task run that
 /// first and last saw it, which is how a scan counts additions and finds removals.
@@ -11,6 +22,43 @@ namespace PrimeTime.Server.Data;
 public sealed class MediaIndexStore(Database database)
 {
     private const long TicksPerSecond = 10_000_000;
+
+    /// <summary>
+    /// Describes a scheduled item without asking Jellyfin. Episodes take their rating and genres from
+    /// the show, and the show's overview when they have none of their own. Null if the item is gone.
+    /// </summary>
+    public ProgramDetails? Describe(string itemType, string itemId)
+    {
+        using var connection = database.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = itemType == ScheduleItemType.Episode
+            ? """
+              SELECT e.title, COALESCE(NULLIF(CAST(substr(e.premiere_date, 1, 4) AS INTEGER), 0), s.year),
+                     s.official_rating, s.community_rating, COALESCE(e.overview, s.overview), s.genres
+              FROM episodes e JOIN shows s ON s.id = e.show_id
+              WHERE e.id = $id;
+              """
+            : """
+              SELECT NULL, year, official_rating, community_rating, overview, genres
+              FROM movies
+              WHERE id = $id;
+              """;
+        command.Parameters.AddWithValue("$id", itemId);
+
+        using var reader = command.ExecuteReader();
+        if (!reader.Read())
+        {
+            return null;
+        }
+
+        return new ProgramDetails(
+            reader.IsDBNull(0) ? null : reader.GetString(0),
+            reader.IsDBNull(1) || reader.GetInt32(1) == 0 ? null : reader.GetInt32(1),
+            reader.IsDBNull(2) ? null : reader.GetString(2),
+            reader.IsDBNull(3) ? null : reader.GetDouble(3),
+            reader.IsDBNull(4) || string.IsNullOrWhiteSpace(reader.GetString(4)) ? null : reader.GetString(4),
+            JsonSerializer.Deserialize<List<string>>(reader.GetString(5)) ?? []);
+    }
 
     public void UpsertMovies(string libraryId, long runId, IReadOnlyList<JellyfinMediaItem> items)
     {
