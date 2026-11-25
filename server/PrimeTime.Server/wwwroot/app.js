@@ -1074,6 +1074,7 @@ async function loadSuggestions() {
 // ---- Channel builder -----------------------------------------------------------
 
 const TITLES_SHOWN = 200;
+const KEYWORDS_SHOWN = 30;
 const channelForm = $("#channel-form");
 let airOrderChosen = false;
 const MAX_LOGO_BYTES = 2 * 1024 * 1024;
@@ -1143,10 +1144,25 @@ function currentChannelBody() {
     yearBefore: mode === "filter" ? optional("yearBefore") : null,
     genres: mode === "filter" ? checkedIn("#genre-options") : [],
     studios: mode === "filter" ? checkedIn("#studio-options") : [],
-    itemIds: mode === "pick" ? [...pickedTitles] : mode === "collection" ? checkedIn("#collection-options") : [],
+    ratings: mode === "filter" ? checkedIn("#rating-options") : [],
+    minScore: mode === "filter" ? optional("minScore") : null,
+    minMinutes: mode === "filter" ? optional("minMinutes") : null,
+    maxMinutes: mode === "filter" ? optional("maxMinutes") : null,
+    addedWithinDays: mode === "filter" ? optional("addedWithinDays") : null,
+    keywords: mode === "filter" ? mergeEntries(checkedIn("#keyword-options"), data.get("extraKeywords")) : [],
+    people: mode === "filter" ? mergeEntries(checkedIn("#people-options"), data.get("extraPeople")) : [],
+    similarCount: mode === "similar" ? optional("similarCount") : null,
+    itemIds: mode === "pick" || mode === "similar" ? [...pickedTitles]
+      : mode === "collection" ? checkedIn("#collection-options") : [],
     airOrder: data.get("airOrder"),
     color: data.get("colorMode") === "custom" ? data.get("color") : null,
   };
+}
+
+// Chips plus anything typed, comma-separated, without repeats.
+function mergeEntries(checked, typed) {
+  const entries = [...checked, ...(typed ?? "").split(",").map((entry) => entry.trim()).filter(Boolean)];
+  return entries.filter((entry, i) => entries.findIndex((e) => e.toLowerCase() === entry.toLowerCase()) === i);
 }
 
 function renderChips(container, facets, selected) {
@@ -1233,13 +1249,19 @@ function renderCollectionList(catalog, contentType, selected) {
     `No collections with ${contentType} yet. Create one in Jellyfin, include Collections under Settings → Library, then run a library scan.`;
 }
 
-async function renderContentOptions(selectedGenres = [], selectedStudios = [], selectedCollections = []) {
+async function renderContentOptions(selected = {}) {
   const contentType = new FormData(channelForm).get("contentType");
   const catalog = await loadCatalog(contentType);
-  renderChips($("#genre-options"), catalog.genres, selectedGenres);
-  renderChips($("#studio-options"), catalog.studios, selectedStudios);
-  renderCollectionList(catalog, contentType, selectedCollections);
+  renderChips($("#genre-options"), catalog.genres, selected.genres ?? []);
+  renderChips($("#studio-options"), catalog.studios, selected.studios ?? []);
+  renderChips($("#rating-options"), catalog.ratings, selected.ratings ?? []);
+  renderChips($("#keyword-options"), catalog.keywords.slice(0, KEYWORDS_SHOWN), selected.keywords ?? []);
+  renderChips($("#people-options"), catalog.people, selected.people ?? []);
+  renderCollectionList(catalog, contentType, selected.collections ?? []);
   $("#studio-label").textContent = contentType === "shows" ? "Networks" : "Studios";
+  $("#length-hint").textContent = contentType === "shows"
+    ? "Scores are Jellyfin's community ratings, out of 10. For shows, length means a typical episode."
+    : "Scores are Jellyfin's community ratings, out of 10.";
   $("#year-hint").textContent = catalog.minYear
     ? `Your library runs from ${catalog.minYear} to ${catalog.maxYear}. "Before" isn't included: from 1980, before 1990 means the 1980s.`
     : "";
@@ -1249,7 +1271,7 @@ async function renderContentOptions(selectedGenres = [], selectedStudios = [], s
 function syncEditorMode() {
   const mode = new FormData(channelForm).get("mode");
   for (const section of channelForm.querySelectorAll("[data-mode]")) {
-    section.hidden = section.dataset.mode !== mode;
+    section.hidden = !section.dataset.mode.split(" ").includes(mode);
   }
 }
 
@@ -1273,7 +1295,9 @@ async function updatePreview() {
   const body = currentChannelBody();
   const preview = $("#channel-preview");
   if (body.mode !== "filter" && body.itemIds.length === 0) {
-    preview.textContent = body.mode === "pick" ? "Choose at least one title." : "Choose at least one collection.";
+    preview.textContent = body.mode === "pick" ? "Choose at least one title."
+      : body.mode === "similar" ? "Choose at least one title to start from."
+      : "Choose at least one collection.";
     return;
   }
 
@@ -1324,16 +1348,29 @@ async function openEditor(channelId) {
     showAutomaticColor(editingChannel.color);
     fields.yearFrom.value = editingChannel.yearFrom ?? "";
     fields.yearBefore.value = editingChannel.yearBefore ?? "";
-    if (editingChannel.mode === "pick") pickedTitles = new Set(editingChannel.itemIds);
+    fields.minScore.value = editingChannel.minScore ?? "";
+    fields.minMinutes.value = editingChannel.minMinutes ?? "";
+    fields.maxMinutes.value = editingChannel.maxMinutes ?? "";
+    fields.addedWithinDays.value = editingChannel.addedWithinDays ?? "";
+    fields.similarCount.value = editingChannel.similarCount ?? 30;
+    if (editingChannel.mode === "pick" || editingChannel.mode === "similar") pickedTitles = new Set(editingChannel.itemIds);
   }
+  // Open the extra filters when the channel already uses one, so nothing set is out of sight.
+  $("#more-filters").open = Boolean(editingChannel && (
+    editingChannel.ratings.length || editingChannel.keywords.length || editingChannel.people.length ||
+    editingChannel.minScore != null || editingChannel.minMinutes != null || editingChannel.maxMinutes != null ||
+    editingChannel.addedWithinDays != null));
 
   syncEditorMode();
   syncColorMode();
-  await renderContentOptions(
-    editingChannel?.genres ?? [],
-    editingChannel?.studios ?? [],
-    editingChannel?.mode === "collection" ? editingChannel.itemIds : [],
-  );
+  await renderContentOptions({
+    genres: editingChannel?.genres,
+    studios: editingChannel?.studios,
+    ratings: editingChannel?.ratings,
+    keywords: editingChannel?.keywords,
+    people: editingChannel?.people,
+    collections: editingChannel?.mode === "collection" ? editingChannel.itemIds : [],
+  });
   await updatePreview();
 }
 
@@ -1362,8 +1399,10 @@ channelForm.addEventListener("change", (event) => {
   schedulePreview();
 });
 
+const PREVIEW_ON_TYPING = ["yearFrom", "yearBefore", "minScore", "minMinutes", "maxMinutes", "extraKeywords", "extraPeople", "similarCount"];
+
 channelForm.addEventListener("input", (event) => {
-  if (event.target.name === "yearFrom" || event.target.name === "yearBefore") schedulePreview();
+  if (PREVIEW_ON_TYPING.includes(event.target.name)) schedulePreview();
 });
 
 $("#title-search").addEventListener("input", renderTitleList);

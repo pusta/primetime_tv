@@ -121,7 +121,8 @@ public sealed class JellyfinClient(HttpClient http)
     {
         var query = $"parentId={Uri.EscapeDataString(libraryId)}&recursive=true" +
                     $"&includeItemTypes={itemType}&excludeLocationTypes=Virtual&collapseBoxSetItems=false" +
-                    $"&fields={IndexedItemFields}&sortBy=SortName&sortOrder=Ascending";
+                    $"&fields={IndexedItemFields}{(itemType is "Movie" or "Series" ? ",People" : "")}" +
+                    "&sortBy=SortName&sortOrder=Ascending";
         return await GetPageAsync(baseUrl, deviceId, token, userId, query, startIndex, limit, ct);
     }
 

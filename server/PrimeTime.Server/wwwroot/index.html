@@ -149,6 +149,7 @@
           <label><input type="radio" name="mode" value="filter" checked> By category</label>
           <label><input type="radio" name="mode" value="pick"> Choose titles</label>
           <label><input type="radio" name="mode" value="collection"> From collections</label>
+          <label><input type="radio" name="mode" value="similar"> Like these titles</label>
         </fieldset>
 
         <div data-mode="filter" class="editor-section">
@@ -165,10 +166,58 @@
             <h3 id="studio-label">Studios</h3>
             <div class="chips" id="studio-options"></div>
           </div>
-          <p class="hint">Leave a section empty to include everything.</p>
+          <details class="more-filters" id="more-filters">
+            <summary>More filters</summary>
+            <div class="editor-section">
+              <div>
+                <h3>Age ratings</h3>
+                <div class="chips" id="rating-options"></div>
+              </div>
+              <div class="field-row">
+                <label>Minimum score <input type="number" name="minScore" min="0" max="10" step="0.5" placeholder="Any"></label>
+                <label>Shortest (minutes) <input type="number" name="minMinutes" min="1" max="1000" placeholder="Any"></label>
+                <label>Longest (minutes) <input type="number" name="maxMinutes" min="1" max="1000" placeholder="Any"></label>
+              </div>
+              <p class="hint" id="length-hint">Scores are Jellyfin's community ratings, out of 10.</p>
+              <label>Added to the library
+                <select name="addedWithinDays">
+                  <option value="">Any time</option>
+                  <option value="7">In the last week</option>
+                  <option value="30">In the last 30 days</option>
+                  <option value="90">In the last 3 months</option>
+                  <option value="365">In the last year</option>
+                </select>
+              </label>
+              <div>
+                <h3>Themes and keywords</h3>
+                <div class="chips" id="keyword-options"></div>
+                <label class="inline-input">Other keywords
+                  <input name="extraKeywords" placeholder="heist, time travel" maxlength="400">
+                </label>
+                <p class="hint">Matches Jellyfin's tags, titles and descriptions.</p>
+              </div>
+              <div>
+                <h3>People</h3>
+                <div class="chips" id="people-options"></div>
+                <label class="inline-input">Other people
+                  <input name="extraPeople" placeholder="Steven Spielberg, Tom Hanks" maxlength="400">
+                </label>
+                <p class="hint">Directors, creators and lead actors.</p>
+              </div>
+            </div>
+          </details>
+          <p class="hint">Leave a section empty to include everything. Everything you set has to match.</p>
         </div>
 
-        <div data-mode="pick" class="editor-section" hidden>
+        <div data-mode="similar" class="editor-section" hidden>
+          <p class="hint">Choose a few titles below. PrimeTime adds the ones in your library most like them,
+            going by genres, themes, people, era and descriptions. New arrivals join if they fit.</p>
+          <label class="short-field">How many similar titles to add
+            <input type="number" name="similarCount" min="5" max="200" value="30">
+          </label>
+        </div>
+
+        <div data-mode="pick similar" class="editor-section" hidden>
           <label>Search <input type="search" id="title-search" placeholder="Search titles"></label>
           <p class="hint" id="title-count"></p>
           <ul class="checklist title-list" id="title-options"></ul>

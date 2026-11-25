@@ -40,7 +40,8 @@ public sealed class ChannelStore(Database database)
             command.CommandText = """
                 SELECT id, number, name, content_type, mode, year_from, year_before, genres, studios, air_order,
                        (SELECT updated_at FROM channel_logos l WHERE l.channel_id = channels.id),
-                       color, color_custom
+                       color, color_custom, ratings, min_score, min_minutes, max_minutes,
+                       added_within_days, keywords, people, similar_count
                 FROM channels ORDER BY number;
                 """;
             using var reader = command.ExecuteReader();
@@ -55,7 +56,17 @@ public sealed class ChannelStore(Database database)
                     JsonSerializer.Deserialize<List<string>>(reader.GetString(7)) ?? [],
                     JsonSerializer.Deserialize<List<string>>(reader.GetString(8)) ?? [],
                     picks.GetValueOrDefault(id) ?? [],
-                    reader.GetString(9)),
+                    reader.GetString(9))
+                {
+                    Ratings = ReadList(reader.GetString(13)),
+                    MinScore = reader.IsDBNull(14) ? null : reader.GetDouble(14),
+                    MinMinutes = reader.IsDBNull(15) ? null : reader.GetInt32(15),
+                    MaxMinutes = reader.IsDBNull(16) ? null : reader.GetInt32(16),
+                    AddedWithinDays = reader.IsDBNull(17) ? null : reader.GetInt32(17),
+                    Keywords = ReadList(reader.GetString(18)),
+                    People = ReadList(reader.GetString(19)),
+                    SimilarCount = reader.IsDBNull(20) ? null : reader.GetInt32(20),
+                },
                     reader.IsDBNull(10) ? null : reader.GetInt64(10),
                     reader.IsDBNull(11) ? null : reader.GetString(11),
                     reader.GetInt64(12) == 1));
@@ -99,15 +110,20 @@ public sealed class ChannelStore(Database database)
                 ? """
                   INSERT INTO channels
                       (number, name, content_type, mode, year_from, year_before, genres, studios, air_order,
-                       color, color_custom, created_at, updated_at)
+                       color, color_custom, ratings, min_score, min_minutes, max_minutes, added_within_days,
+                       keywords, people, similar_count, created_at, updated_at)
                   VALUES ($number, $name, $type, $mode, $from, $before, $genres, $studios, $airOrder,
-                          $color, $colorCustom, $now, $now)
+                          $color, $colorCustom, $ratings, $minScore, $minMinutes, $maxMinutes, $addedWithin,
+                          $keywords, $people, $similarCount, $now, $now)
                   RETURNING id;
                   """
                 : """
                   UPDATE channels SET number = $number, name = $name, content_type = $type, mode = $mode,
                       year_from = $from, year_before = $before, genres = $genres, studios = $studios,
-                      air_order = $airOrder, color = $color, color_custom = $colorCustom, updated_at = $now
+                      air_order = $airOrder, color = $color, color_custom = $colorCustom,
+                      ratings = $ratings, min_score = $minScore, min_minutes = $minMinutes,
+                      max_minutes = $maxMinutes, added_within_days = $addedWithin, keywords = $keywords,
+                      people = $people, similar_count = $similarCount, updated_at = $now
                   WHERE id = $id
                   RETURNING id;
                   """;
@@ -123,6 +139,14 @@ public sealed class ChannelStore(Database database)
             command.Parameters.AddWithValue("$airOrder", definition.AirOrder);
             command.Parameters.AddWithValue("$color", color);
             command.Parameters.AddWithValue("$colorCustom", colorCustom ? 1 : 0);
+            command.Parameters.AddWithValue("$ratings", JsonSerializer.Serialize(definition.Ratings));
+            command.Parameters.AddWithValue("$minScore", (object?)definition.MinScore ?? DBNull.Value);
+            command.Parameters.AddWithValue("$minMinutes", (object?)definition.MinMinutes ?? DBNull.Value);
+            command.Parameters.AddWithValue("$maxMinutes", (object?)definition.MaxMinutes ?? DBNull.Value);
+            command.Parameters.AddWithValue("$addedWithin", (object?)definition.AddedWithinDays ?? DBNull.Value);
+            command.Parameters.AddWithValue("$keywords", JsonSerializer.Serialize(definition.Keywords));
+            command.Parameters.AddWithValue("$people", JsonSerializer.Serialize(definition.People));
+            command.Parameters.AddWithValue("$similarCount", (object?)definition.SimilarCount ?? DBNull.Value);
             command.Parameters.AddWithValue("$now", now);
             channelId = Convert.ToInt64(command.ExecuteScalar());
         }
@@ -175,4 +199,6 @@ public sealed class ChannelStore(Database database)
         command.CommandText = "DELETE FROM channels;";
         command.ExecuteNonQuery();
     }
+
+    private static List<string> ReadList(string json) => JsonSerializer.Deserialize<List<string>>(json) ?? [];
 }

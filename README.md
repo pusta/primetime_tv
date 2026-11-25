@@ -60,14 +60,24 @@ and the whole index.
 ## Channels and the Guide
 
 The **Guide** shows what's on each channel, up to 7 days ahead. Choose **Add channel** to add one of
-the channels PrimeTime suggests from your library (your collections, or by genre, decade, network, or
-a single-show marathon), or choose **Build your own**:
+the channels PrimeTime suggests from your library, or choose **Build your own**. Suggestions include
+your collections; genres, decades and combinations like 80s Action; themes from Jellyfin's tags, such
+as Superhero Movies; favorite directors and stars; family and kids channels; the best rated; short and
+long watches; recent arrivals; seasonal channels; networks; and single-show marathons. Each one is
+counted against your library with the same rules a channel uses, and ones with too few titles are left
+out. To build your own:
 
 - Pick **Movies** or **Shows**.
 - **By category** includes everything matching a year range, genres and studios or networks. "Before
-  year" isn't included, so from 1980, before 1990 means the 1980s. New matching titles join by
-  themselves.
+  year" isn't included, so from 1980, before 1990 means the 1980s. **More filters** adds age ratings,
+  a minimum score, length (a typical episode, for shows), how recently titles were added, themes and
+  keywords (Jellyfin's tags, titles and descriptions), and people (directors, creators and lead
+  actors). Everything you set has to match. New matching titles join by themselves.
 - **Choose titles** plays only the movies or shows you select.
+- **Like these titles** starts from a few you choose and adds the ones in your library most like them,
+  going by genres, themes, people, era and descriptions. Shared rare details count for more than
+  common ones, so two heist films starring the same actor match more closely than two dramas. It all
+  runs on the server, with no model to download, and new arrivals join if they fit.
 - **From collections** plays whatever is in the Jellyfin collections you select, so you can manage a
   channel's content from Jellyfin. Include **Collections** in your libraries under *Settings → Library*
   to use this. Changes reach the channel after the next library scan. Only items in your selected
@@ -83,8 +93,10 @@ Each schedule is stored ahead of time, so what's on doesn't move when the librar
 channel replaces what hasn't started yet, and whatever is on air finishes first. Changing the air
 order starts again from the top of the new order. After a scan, a
 channel is rescheduled only if something it was going to play has been removed or one of its
-collections changed. Select a channel's
-name in the Guide to edit it.
+collections changed. Use the pencil next to a channel in the Guide to edit it.
+
+Directors and lead actors are read during the library scan, so run a scan after updating before
+building people channels.
 
 Each channel can have a logo, shown in place of its name in the Guide. Add one in the channel builder: a
 PNG, JPEG, WebP or GIF image up to 2 MB.
