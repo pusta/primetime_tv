@@ -15,12 +15,24 @@ public sealed record ChannelRequest(
     List<string>? Studios,
     List<string>? ItemIds,
     string? AirOrder,
-    string? Color);
+    string? Color,
+    List<string>? Ratings = null,
+    double? MinScore = null,
+    int? MinMinutes = null,
+    int? MaxMinutes = null,
+    int? AddedWithinDays = null,
+    List<string>? Keywords = null,
+    List<string>? People = null,
+    int? SimilarCount = null);
 
 public static partial class ChannelEndpoints
 {
     private const int FacetsShown = 60;
     private const int PreviewSamples = 8;
+    private const int PeopleShown = 40;
+    private const int MaxListEntries = 25;
+    private const int MaxEntryLength = 100;
+    private const int MaxSeeds = 50;
     private const int MaxLogoBytes = 2 * 1024 * 1024;
 
     public static void MapChannelEndpoints(this WebApplication app)
@@ -38,6 +50,21 @@ public static partial class ChannelEndpoints
                 items = titles.Select(t => new { t.Id, t.Title, t.Year, t.EpisodeCount }),
                 genres = Facet(titles.SelectMany(t => t.Genres)),
                 studios = Facet(titles.SelectMany(t => t.Studios)),
+                ratings = Facet(titles.Select(t => t.Rating).OfType<string>()),
+                keywords = Facet(titles.SelectMany(t => t.Tags)
+                    .Where(tag => !ChannelSuggestions.IsUnhelpfulTag(tag, titles.Count))),
+                people = titles.SelectMany(t => t.People)
+                    .GroupBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+                    .Select(g => new
+                    {
+                        name = g.Key,
+                        role = g.Any(p => p.Role != "Actor") ? g.First(p => p.Role != "Actor").Role : "Actor",
+                        count = g.Count(),
+                    })
+                    .Where(p => p.count >= 2)
+                    .OrderByDescending(p => p.count)
+                    .ThenBy(p => p.name, StringComparer.OrdinalIgnoreCase)
+                    .Take(PeopleShown),
                 minYear = years.Count > 0 ? years.Min() : (int?)null,
                 maxYear = years.Count > 0 ? years.Max() : (int?)null,
                 collections = snapshot.Collections
@@ -243,16 +270,39 @@ public static partial class ChannelEndpoints
             return null;
         }
 
-        if (body.Mode is ChannelMode.Pick or ChannelMode.Collection)
+        if (body.Mode is ChannelMode.Pick or ChannelMode.Collection or ChannelMode.Similar)
         {
             var ids = (body.ItemIds ?? []).Where(i => !string.IsNullOrWhiteSpace(i)).Distinct().ToList();
             if (ids.Count == 0)
             {
-                error = body.Mode == ChannelMode.Pick ? "Choose at least one title." : "Choose at least one collection.";
+                error = body.Mode == ChannelMode.Collection ? "Choose at least one collection."
+                    : body.Mode == ChannelMode.Similar ? "Choose at least one title to start from."
+                    : "Choose at least one title.";
                 return null;
             }
 
-            return new ChannelDefinition(body.ContentType, body.Mode, null, null, [], [], ids, airOrder);
+            if (body.Mode != ChannelMode.Similar)
+            {
+                return new ChannelDefinition(body.ContentType, body.Mode, null, null, [], [], ids, airOrder);
+            }
+
+            if (ids.Count > MaxSeeds)
+            {
+                error = $"Start from {MaxSeeds} titles or fewer.";
+                return null;
+            }
+
+            var similarCount = body.SimilarCount ?? ChannelDefinition.DefaultSimilarCount;
+            if (similarCount is < 5 or > 200)
+            {
+                error = "Add between 5 and 200 similar titles.";
+                return null;
+            }
+
+            return new ChannelDefinition(body.ContentType, ChannelMode.Similar, null, null, [], [], ids, airOrder)
+            {
+                SimilarCount = similarCount,
+            };
         }
 
         if (body.Mode != ChannelMode.Filter)
@@ -267,9 +317,49 @@ public static partial class ChannelEndpoints
             return null;
         }
 
+        if (body.MinScore is < 0 or > 10)
+        {
+            error = "Scores go from 0 to 10.";
+            return null;
+        }
+
+        if (body.MinMinutes is < 1 or > 1000 || body.MaxMinutes is < 1 or > 1000)
+        {
+            error = "Lengths go from 1 to 1000 minutes.";
+            return null;
+        }
+
+        if (body.MinMinutes is { } shortest && body.MaxMinutes is { } longest && shortest > longest)
+        {
+            error = "The longest length needs to be at least the shortest.";
+            return null;
+        }
+
+        if (body.AddedWithinDays is < 1 or > 3650)
+        {
+            error = "Choose how recently titles were added, up to 10 years.";
+            return null;
+        }
+
+        var lists = new[] { body.Genres, body.Studios, body.Ratings, body.Keywords, body.People };
+        if (lists.Any(l => l is { Count: > MaxListEntries } || l?.Any(v => v?.Length > MaxEntryLength) == true))
+        {
+            error = $"Each list can have up to {MaxListEntries} entries of {MaxEntryLength} characters.";
+            return null;
+        }
+
         return new ChannelDefinition(
             body.ContentType, ChannelMode.Filter, body.YearFrom, body.YearBefore,
-            Clean(body.Genres), Clean(body.Studios), [], airOrder);
+            Clean(body.Genres), Clean(body.Studios), [], airOrder)
+        {
+            Ratings = Clean(body.Ratings),
+            MinScore = body.MinScore,
+            MinMinutes = body.MinMinutes,
+            MaxMinutes = body.MaxMinutes,
+            AddedWithinDays = body.AddedWithinDays,
+            Keywords = Clean(body.Keywords).Select(k => k.Trim()).ToList(),
+            People = Clean(body.People).Select(p => p.Trim()).ToList(),
+        };
     }
 
     private static List<string> Clean(List<string>? values) =>
@@ -295,6 +385,14 @@ public static partial class ChannelEndpoints
         channel.Definition.Studios,
         channel.Definition.ItemIds,
         channel.Definition.AirOrder,
+        channel.Definition.Ratings,
+        channel.Definition.MinScore,
+        channel.Definition.MinMinutes,
+        channel.Definition.MaxMinutes,
+        channel.Definition.AddedWithinDays,
+        channel.Definition.Keywords,
+        channel.Definition.People,
+        channel.Definition.SimilarCount,
         channel.LogoUrl,
         channel.Color,
         channel.ColorCustom,

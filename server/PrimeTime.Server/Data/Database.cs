@@ -250,6 +250,20 @@ public sealed class Database
             last_seen_ts INTEGER NOT NULL
         );
         """,
+
+        // 11: Directors and main cast for "people" channels, and more ways to fill a channel.
+        """
+        ALTER TABLE movies ADD COLUMN people TEXT NOT NULL DEFAULT '[]';
+        ALTER TABLE shows ADD COLUMN people TEXT NOT NULL DEFAULT '[]';
+        ALTER TABLE channels ADD COLUMN ratings TEXT NOT NULL DEFAULT '[]';
+        ALTER TABLE channels ADD COLUMN min_score REAL;
+        ALTER TABLE channels ADD COLUMN min_minutes INTEGER;
+        ALTER TABLE channels ADD COLUMN max_minutes INTEGER;
+        ALTER TABLE channels ADD COLUMN added_within_days INTEGER;
+        ALTER TABLE channels ADD COLUMN keywords TEXT NOT NULL DEFAULT '[]';
+        ALTER TABLE channels ADD COLUMN people TEXT NOT NULL DEFAULT '[]';
+        ALTER TABLE channels ADD COLUMN similar_count INTEGER;
+        """,
     ];
 
     public Database(PrimeTimeOptions options, ILogger<Database> logger)

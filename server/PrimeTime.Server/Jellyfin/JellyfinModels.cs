@@ -47,7 +47,8 @@ public sealed record JellyfinMediaItem(
     string? Status,
     string? SeriesId,
     int? ParentIndexNumber,
-    int? IndexNumber);
+    int? IndexNumber,
+    List<JellyfinPerson>? People = null);
 
 /// <summary>What a player can decode. Jellyfin only transcodes what falls outside this.</summary>
 /// <param name="Container">The HLS segment container: "ts", or "mp4" for fragmented MP4.</param>

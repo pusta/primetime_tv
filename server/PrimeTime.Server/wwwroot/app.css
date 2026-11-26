@@ -361,3 +361,9 @@ input[type="color"].color-input { width: 56px; height: 36px; padding: 2px; }
 .device-list small { display: block; color: var(--muted); }
 #link-view p { margin: 0 0 12px; }
 #link-confirm .actions { margin-top: 4px; }
+
+.more-filters { border-top: 1px solid var(--border); padding-top: 12px; }
+.more-filters summary { cursor: pointer; font-weight: 500; }
+.more-filters > .editor-section { margin-top: 14px; }
+.inline-input { margin-top: 8px; }
+.short-field { max-width: 240px; }

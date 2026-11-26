@@ -4,6 +4,9 @@ using PrimeTime.Server.Jellyfin;
 
 namespace PrimeTime.Server.Data;
 
+/// <summary>A person as stored in the index. Role is Director, Creator or Actor.</summary>
+public sealed record StoredPerson(string Name, string Role);
+
 /// <summary>What the guide shows about a program, from the local index.</summary>
 /// <param name="EpisodeTitle">For an episode, its own title; the schedule's title is the show's.</param>
 /// <param name="Year">An episode's air year, or its show's when unknown.</param>
@@ -65,11 +68,11 @@ public sealed class MediaIndexStore(Database database)
         const string sql = """
             INSERT INTO movies
                 (id, library_id, title, sort_title, year, overview, runtime_seconds, genres, studios, tags,
-                 official_rating, community_rating, premiere_date, date_added, provider_ids,
+                 official_rating, community_rating, premiere_date, date_added, provider_ids, people,
                  first_seen_run_id, last_seen_run_id)
             VALUES
                 ($id, $libraryId, $title, $sortTitle, $year, $overview, $runtime, $genres, $studios, $tags,
-                 $officialRating, $communityRating, $premiereDate, $dateAdded, $providerIds,
+                 $officialRating, $communityRating, $premiereDate, $dateAdded, $providerIds, $people,
                  $runId, $runId)
             ON CONFLICT (id) DO UPDATE SET
                 library_id = excluded.library_id, title = excluded.title, sort_title = excluded.sort_title,
@@ -77,7 +80,8 @@ public sealed class MediaIndexStore(Database database)
                 genres = excluded.genres, studios = excluded.studios, tags = excluded.tags,
                 official_rating = excluded.official_rating, community_rating = excluded.community_rating,
                 premiere_date = excluded.premiere_date, date_added = excluded.date_added,
-                provider_ids = excluded.provider_ids, last_seen_run_id = excluded.last_seen_run_id;
+                provider_ids = excluded.provider_ids, people = excluded.people,
+                last_seen_run_id = excluded.last_seen_run_id;
             """;
 
         WriteBatch(sql, libraryId, runId, items, (command, item) =>
@@ -92,11 +96,11 @@ public sealed class MediaIndexStore(Database database)
         const string sql = """
             INSERT INTO shows
                 (id, library_id, title, sort_title, year, overview, status, genres, studios, tags,
-                 official_rating, community_rating, premiere_date, date_added, provider_ids,
+                 official_rating, community_rating, premiere_date, date_added, provider_ids, people,
                  first_seen_run_id, last_seen_run_id)
             VALUES
                 ($id, $libraryId, $title, $sortTitle, $year, $overview, $status, $genres, $studios, $tags,
-                 $officialRating, $communityRating, $premiereDate, $dateAdded, $providerIds,
+                 $officialRating, $communityRating, $premiereDate, $dateAdded, $providerIds, $people,
                  $runId, $runId)
             ON CONFLICT (id) DO UPDATE SET
                 library_id = excluded.library_id, title = excluded.title, sort_title = excluded.sort_title,
@@ -104,7 +108,8 @@ public sealed class MediaIndexStore(Database database)
                 genres = excluded.genres, studios = excluded.studios, tags = excluded.tags,
                 official_rating = excluded.official_rating, community_rating = excluded.community_rating,
                 premiere_date = excluded.premiere_date, date_added = excluded.date_added,
-                provider_ids = excluded.provider_ids, last_seen_run_id = excluded.last_seen_run_id;
+                provider_ids = excluded.provider_ids, people = excluded.people,
+                last_seen_run_id = excluded.last_seen_run_id;
             """;
 
         WriteBatch(sql, libraryId, runId, items, (command, item) =>
@@ -205,6 +210,8 @@ public sealed class MediaIndexStore(Database database)
         tx.Commit();
     }
 
+    private const int LeadActors = 10;
+
     private static void AddTitleFields(SqliteCommand command, JellyfinMediaItem item)
     {
         command.Parameters.AddWithValue("$title", item.Name ?? "(untitled)");
@@ -220,6 +227,21 @@ public sealed class MediaIndexStore(Database database)
         command.Parameters.AddWithValue("$premiereDate", Nullable(item.PremiereDate));
         command.Parameters.AddWithValue("$dateAdded", Nullable(item.DateCreated));
         command.Parameters.AddWithValue("$providerIds", JsonSerializer.Serialize(item.ProviderIds ?? []));
+        command.Parameters.AddWithValue("$people", JsonSerializer.Serialize(KeyPeople(item)));
+    }
+
+    /// <summary>
+    /// Who made it and who leads it: directors and creators, plus the top-billed actors. Jellyfin
+    /// lists dozens of people per title, mostly minor parts and crew, which would only add noise.
+    /// </summary>
+    private static List<StoredPerson> KeyPeople(JellyfinMediaItem item)
+    {
+        var people = item.People ?? [];
+        return people.Where(p => p.Type is "Director" or "Creator" && !string.IsNullOrWhiteSpace(p.Name))
+            .Concat(people.Where(p => p.Type == "Actor" && !string.IsNullOrWhiteSpace(p.Name)).Take(LeadActors))
+            .Select(p => new StoredPerson(p.Name!, p.Type!))
+            .DistinctBy(p => (p.Name, p.Role))
+            .ToList();
     }
 
     private static long? RuntimeSeconds(JellyfinMediaItem item) => item.RunTimeTicks / TicksPerSecond;
