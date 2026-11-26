@@ -7,16 +7,26 @@ PrimeTime is a self-hosted service that sits next to [Jellyfin](https://jellyfin
 can tune in and see whatever is "on" instead of picking something to watch. Native apps for iPhone,
 iPad and Apple TV come later.
 
-> **Status: early.** Right now PrimeTime runs in Docker, walks you through a one-time setup, connects
-> to a Jellyfin server, keeps an index of the movies and shows in the libraries you choose, and
-> schedules channels into a TV guide. Playback comes next.
+> **Status: early.** PrimeTime runs in Docker, walks you through a one-time setup, connects to a
+> Jellyfin server, indexes the movies and shows in the libraries you choose, schedules channels into
+> a TV guide, and plays them in the browser. The native apps are in progress.
 
-## Quick start
+## Deploying
 
-You need Docker with Compose (Docker Desktop, OrbStack, or Docker Engine on Linux).
+PrimeTime runs as a single container. The prebuilt image, for `linux/amd64` (most PCs and servers)
+and `linux/arm64` (Apple Silicon, Raspberry Pi 4/5 and other ARM boards), is published at:
 
-PrimeTime is published as a prebuilt image for `linux/amd64` and `linux/arm64` at
-`ghcr.io/pusta/primetime_tv`, so you only need two files, not the source:
+```
+ghcr.io/pusta/primetime_tv
+```
+
+You need Docker with Compose (Docker Desktop, OrbStack, or Docker Engine on Linux) and a Jellyfin
+server that the machine running PrimeTime can reach. PrimeTime doesn't transcode, so it needs no GPU
+and very little CPU; viewers' video streams pass through it, so give it a decent network connection.
+
+### Option 1: Docker Compose (recommended)
+
+Download the compose file and the example settings into a folder of their own, then start it:
 
 ```bash
 mkdir primetime && cd primetime
@@ -25,27 +35,167 @@ curl -fsSL https://raw.githubusercontent.com/pusta/primetime_tv/main/.env.exampl
 docker compose up -d
 ```
 
-Editing `.env` is optional: it sets the port, time zone, log level and which image tag to run.
+Open `http://<this machine's address>:8080` and follow [First-time setup](#first-time-setup).
 
-| Image tag | What it is                                                   |
-| --------- | ------------------------------------------------------------ |
-| `latest`  | the newest release (default)                                 |
-| `1.2.3`, `1.2` | a specific release, or the newest patch of a release line |
-| `edge`    | the newest build of the `main` branch; may be unstable       |
+Before you start, or any time after, edit `.env` to change the settings. The ones most worth setting:
 
-To update: `docker compose pull && docker compose up -d`. Your data stays in the `primetime-data`
-volume.
+- `TZ`: your time zone, for example `America/New_York`, so log times are local. (The guide always
+  shows times in each viewer's own time zone.)
+- `PRIMETIME_HTTP_PORT`: if something else already uses port 8080.
+- `PRIMETIME_PUBLIC_URL`: the address your phone and TV will use to reach PrimeTime, for example
+  `http://192.168.1.20:8080`. Sign-in QR codes for the apps point here.
 
-To build from source instead:
+Run `docker compose up -d` again after changing `.env`. All settings are listed under
+[Configuration](#configuration).
+
+### Option 2: `docker run`
+
+The same thing without a compose file:
+
+```bash
+docker run -d --name primetime --restart unless-stopped \
+  -p 8080:8080 \
+  -v primetime-data:/data \
+  -e TZ=America/New_York \
+  -e PRIMETIME_PUBLIC_URL=http://192.168.1.20:8080 \
+  --add-host host.docker.internal:host-gateway \
+  ghcr.io/pusta/primetime_tv:latest
+```
+
+### Option 3: next to Jellyfin in the same compose file
+
+If Jellyfin already runs from a compose file, you can add PrimeTime to it. Both containers then share
+a network, and PrimeTime reaches Jellyfin by its service name:
+
+```yaml
+services:
+  jellyfin:
+    # ...your existing Jellyfin service...
+
+  primetime:
+    image: ghcr.io/pusta/primetime_tv:latest
+    container_name: primetime
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      TZ: America/New_York
+      PRIMETIME_PUBLIC_URL: http://192.168.1.20:8080
+    volumes:
+      - primetime-data:/data
+
+volumes:
+  primetime-data:
+```
+
+During setup, use `http://jellyfin:8096` as the Jellyfin URL (or whatever the service is called).
+The same compose snippet works as a stack in Portainer or Dockge.
+
+### Which Jellyfin URL to use
+
+PrimeTime connects to Jellyfin from inside its container, so `localhost` means the container, not
+your computer.
+
+| Jellyfin runs…                         | Use                                       |
+| -------------------------------------- | ----------------------------------------- |
+| on the same computer, outside Docker   | `http://host.docker.internal:8096`        |
+| in Docker, in the same compose project | `http://jellyfin:8096` (its service name) |
+| on another machine on your network     | `http://192.168.x.x:8096` or its hostname |
+
+If Jellyfin uses a base URL (for example `/jellyfin`), include it.
+
+### Choosing a version
+
+`PRIMETIME_IMAGE_TAG` in `.env` (or the tag after `:` in the image name) picks what you run:
+
+| Image tag      | What it is                                                     |
+| -------------- | -------------------------------------------------------------- |
+| `latest`       | the newest release (default)                                   |
+| `0.1.0`, `0.1` | a specific release, or the newest patch of a release line      |
+| `edge`         | the newest build of the `main` branch; may be unstable         |
+
+Pin a version such as `0.1` if you'd rather update on your own schedule.
+
+### Updating
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+With `docker run`, pull the new image, then remove the container and run the same command again.
+Your data lives in the `primetime-data` volume, so it carries over. Database changes are applied
+automatically when the new version starts. Moving back to an older version after that isn't
+supported, so back up first.
+
+### Backing up and restoring
+
+Everything PrimeTime keeps (admin account, Jellyfin connection, channels, schedules, logos and the
+keys that encrypt the Jellyfin credentials) is in the `/data` volume. To back it up from the folder
+with your compose file:
+
+```bash
+docker compose stop
+docker run --rm --volumes-from primetime -v "$PWD":/backup alpine \
+  tar czf /backup/primetime-data.tgz -C /data .
+docker compose start
+```
+
+To restore, stop PrimeTime, unpack the archive into the volume, and start it again:
+
+```bash
+docker compose stop
+docker run --rm --volumes-from primetime -v "$PWD":/backup alpine \
+  sh -c 'rm -rf /data/* && tar xzf /backup/primetime-data.tgz -C /data'
+docker compose start
+```
+
+The backup holds the encryption keys alongside the database, so store it as carefully as a password.
+
+### Reaching it from outside your home
+
+PrimeTime serves plain HTTP. To use it away from home, either reach it over a VPN (such as Tailscale
+or WireGuard), or put it behind a reverse proxy that adds HTTPS. With a proxy:
+
+1. Point the proxy at PrimeTime's port. For example, with Caddy:
+
+   ```
+   primetime.example.com {
+       reverse_proxy 192.168.1.20:8080
+   }
+   ```
+
+2. Set `PRIMETIME_TRUSTED_PROXIES` to the proxy's IP address (or its Docker network's range, such as
+   `172.18.0.0/16`, if the proxy runs in Docker), so PrimeTime trusts its `X-Forwarded-*` headers.
+3. Set `PRIMETIME_PUBLIC_URL` to the HTTPS address, for example `https://primetime.example.com`.
+
+Video passes through the proxy too, so make sure it doesn't buffer or time out long responses.
+
+### Useful commands
+
+```bash
+docker compose logs -f primetime     # follow the logs
+curl http://localhost:8080/health    # health check
+docker compose ps                    # running state, including the health check
+docker compose down                  # stop and remove the container (data is kept)
+docker compose down -v               # stop and delete all PrimeTime data
+```
+
+### Building from source
+
+To build the image yourself instead of pulling it:
 
 ```bash
 git clone https://github.com/pusta/primetime_tv.git
 cd primetime_tv
 cp .env.example .env
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 ```
 
-Open <http://localhost:8080> (or the port you set as `PRIMETIME_HTTP_PORT`).
+## First-time setup
+
+Open `http://<this machine's address>:8080` (or the port you set as `PRIMETIME_HTTP_PORT`). Do this
+straight away: until the admin account exists, anyone who can reach the port can create it.
 
 1. **Create the admin account.** The first visit asks for a username and password. This is the
    PrimeTime admin login, separate from your Jellyfin users.
@@ -161,28 +311,6 @@ The next run is counted from the end of the last one. Saving a shorter interval 
 straight away. If PrimeTime was stopped when a scan was due, or was restarted partway through one,
 it scans again as soon as it's back up.
 
-### Which URL to use
-
-PrimeTime connects to Jellyfin from inside its container, so `localhost` means the container, not
-your computer.
-
-| Jellyfin runs…                         | Use                                       |
-| -------------------------------------- | ----------------------------------------- |
-| on the same computer, outside Docker   | `http://host.docker.internal:8096`        |
-| in Docker, in the same compose project | `http://jellyfin:8096` (its service name) |
-| on another machine on your network     | `http://192.168.x.x:8096` or its hostname |
-
-If Jellyfin uses a base URL (for example `/jellyfin`), include it.
-
-### Useful commands
-
-```bash
-docker compose logs -f primetime     # follow the logs
-curl http://localhost:8080/health    # health check
-docker compose down                  # stop (data is kept)
-docker compose down -v               # stop and delete all PrimeTime data
-```
-
 ## Configuration
 
 Set these in `.env` (see [.env.example](.env.example)):
@@ -191,7 +319,7 @@ Set these in `.env` (see [.env.example](.env.example)):
 | --------------------- | ------------- | --------------------------------------------------- |
 | `PRIMETIME_IMAGE_TAG` | `latest`     | Which published image to run: `latest`, a version, or `edge` |
 | `PRIMETIME_HTTP_PORT` | `8080`        | Port on your machine for the web UI and API         |
-| `TZ`                  | `UTC`         | Time zone for logs (and, later, channel schedules)  |
+| `TZ`                  | `UTC`         | Time zone for logs, for example `America/New_York`  |
 | `PRIMETIME_LOG_LEVEL` | `Information` | `Trace`, `Debug`, `Information`, `Warning`, `Error` |
 | `PRIMETIME_TRUSTED_PROXIES` | *(empty)* | IP addresses or CIDR ranges of reverse proxies to trust |
 | `PRIMETIME_PUBLIC_URL` | *(empty)* | The address people reach PrimeTime at; QR codes for the apps link here |
