@@ -15,11 +15,34 @@ iPad and Apple TV come later.
 
 You need Docker with Compose (Docker Desktop, OrbStack, or Docker Engine on Linux).
 
+PrimeTime is published as a prebuilt image for `linux/amd64` and `linux/arm64` at
+`ghcr.io/pusta/primetime_tv`, so you only need two files, not the source:
+
 ```bash
-git clone git@github.com:pusta/primetime_tv.git
+mkdir primetime && cd primetime
+curl -fsSLO https://raw.githubusercontent.com/pusta/primetime_tv/main/docker-compose.yml
+curl -fsSL https://raw.githubusercontent.com/pusta/primetime_tv/main/.env.example -o .env
+docker compose up -d
+```
+
+Editing `.env` is optional: it sets the port, time zone, log level and which image tag to run.
+
+| Image tag | What it is                                                   |
+| --------- | ------------------------------------------------------------ |
+| `latest`  | the newest release (default)                                 |
+| `1.2.3`, `1.2` | a specific release, or the newest patch of a release line |
+| `edge`    | the newest build of the `main` branch; may be unstable       |
+
+To update: `docker compose pull && docker compose up -d`. Your data stays in the `primetime-data`
+volume.
+
+To build from source instead:
+
+```bash
+git clone https://github.com/pusta/primetime_tv.git
 cd primetime_tv
-cp .env.example .env        # optional: change the port, time zone or log level
-docker compose up --build
+cp .env.example .env
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 ```
 
 Open <http://localhost:8080> (or the port you set as `PRIMETIME_HTTP_PORT`).
@@ -166,6 +189,7 @@ Set these in `.env` (see [.env.example](.env.example)):
 
 | Variable              | Default       | What it does                                        |
 | --------------------- | ------------- | --------------------------------------------------- |
+| `PRIMETIME_IMAGE_TAG` | `latest`     | Which published image to run: `latest`, a version, or `edge` |
 | `PRIMETIME_HTTP_PORT` | `8080`        | Port on your machine for the web UI and API         |
 | `TZ`                  | `UTC`         | Time zone for logs (and, later, channel schedules)  |
 | `PRIMETIME_LOG_LEVEL` | `Information` | `Trace`, `Debug`, `Information`, `Warning`, `Error` |
@@ -214,7 +238,9 @@ The container's Docker `HEALTHCHECK` calls it too.
 
 ```
 .
-├── docker-compose.yml        # runs the backend; SQLite data lives in a named volume
+├── .github/workflows/docker.yml  # builds the image and publishes it to ghcr.io
+├── docker-compose.yml        # runs the published image; SQLite data lives in a named volume
+├── docker-compose.dev.yml    # override that builds the image from this checkout instead
 ├── Dockerfile                # two-stage .NET build → small ASP.NET runtime image, non-root
 ├── .env.example              # settings for docker compose
 ├── server/
@@ -244,6 +270,18 @@ The container's Docker `HEALTHCHECK` calls it too.
   it handles. If that ever stops being true, the data layer is small enough to move to Postgres.
 - **A plain HTML/JS management UI** served by the backend means no Node toolchain or front-end
   build step. It can grow into a real front-end project when the UI needs it.
+
+## Publishing images
+
+[.github/workflows/docker.yml](.github/workflows/docker.yml) builds the image for `amd64` and
+`arm64` and pushes it to GitHub Container Registry:
+
+- every push to `main` publishes `:edge` and `:sha-<commit>`
+- a version tag publishes `:1.2.3`, `:1.2` and `:latest`:
+  `git tag v1.2.3 && git push origin v1.2.3`
+- pull requests build the image to check it, without publishing
+
+The workflow signs in with the repository's built-in `GITHUB_TOKEN`, so no secrets are needed.
 
 ## Developing without Docker
 

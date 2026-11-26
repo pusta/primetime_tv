@@ -1,7 +1,9 @@
 # syntax=docker/dockerfile:1
 
 # ---- Build ----
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+# The build stage always runs on the builder's own CPU, even when making an image for another
+# architecture: the published app is portable .NET, so only the runtime stage differs per platform.
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
 # Restore first so the package layer is cached until the project file changes.
