@@ -589,7 +589,7 @@ $("#library-cancel").addEventListener("click", () => {
 
 // ---- Guide ------------------------------------------------------------------
 
-const PIXELS_PER_MINUTE = 4;
+const PIXELS_PER_MINUTE = 8;
 const HALF_HOUR = 1800;
 const GUIDE_WINDOW = 8 * 3600;
 const GUIDE_STEP = 4 * 3600;
@@ -599,6 +599,11 @@ const GUIDE_LOOKAHEAD = 7 * 24 * 3600;
 
 let guideStart = null;
 let guideTimer = null;
+let guideData = null;
+// The program shown in the panel above the grid, by channel and start time so it survives refreshes.
+let guidePick = null;
+// Set when the guide moves to a new time window, so the next render scrolls to the right place.
+let guideNeedsScroll = true;
 
 function nowSeconds() {
   return Math.floor(Date.now() / 1000);
@@ -606,7 +611,7 @@ function nowSeconds() {
 
 function currentGuideStart() {
   const now = nowSeconds();
-  return now - (now % HALF_HOUR) - HALF_HOUR;
+  return now - (now % HALF_HOUR);
 }
 
 function routeGuide() {
@@ -632,11 +637,13 @@ async function loadGuide() {
   clearTimeout(guideTimer);
   guideStart ??= currentGuideStart();
   const guide = await api("GET", `/api/guide?from=${guideStart}&to=${guideStart + GUIDE_WINDOW}`);
+  guideData = guide;
 
   const hasChannels = guide.channels.length > 0;
   $("#guide-empty").hidden = hasChannels;
   $("#guide-board").hidden = !hasChannels;
   $("#guide-tools").hidden = !hasChannels;
+  $("#guide-hero").hidden = !hasChannels;
   if (hasChannels) renderGuide(guide);
 
   guideTimer = setTimeout(() => {
@@ -648,8 +655,78 @@ function clockLabel(seconds) {
   return new Date(seconds * 1000).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
+function durationLabel(seconds) {
+  const minutes = Math.round(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  if (hours === 0) return `${rest}m`;
+  return rest === 0 ? `${hours}h` : `${hours}h ${rest}m`;
+}
+
 function guideOffset(seconds) {
   return ((seconds - guideStart) / 60) * PIXELS_PER_MINUTE;
+}
+
+function isOnAir(program, now) {
+  return program.start <= now && now < program.end;
+}
+
+// Keeps the picked program if it's still in the guide; otherwise falls back to what's on now,
+// on the same channel if there was one, or the first channel.
+function resolvePick(guide) {
+  const channelOf = (id) => guide.channels.find((c) => c.id === id);
+  if (guidePick) {
+    const channel = channelOf(guidePick.channelId);
+    const program = channel?.programs.find((p) => p.start === guidePick.start);
+    if (channel && program && program.end > guide.now) return { channel, program };
+  }
+  const order = guidePick ? [channelOf(guidePick.channelId), ...guide.channels] : guide.channels;
+  for (const channel of order.filter(Boolean)) {
+    const program = channel.programs.find((p) => isOnAir(p, guide.now)) ?? channel.programs.find((p) => p.start > guide.now);
+    if (program) return { channel, program };
+  }
+  return null;
+}
+
+function renderHero(pick, now) {
+  const hero = $("#guide-hero");
+  hero.hidden = !pick;
+  if (!pick) return;
+  const { channel, program } = pick;
+  if (channel.color) hero.style.setProperty("--channel", channel.color);
+  else hero.style.removeProperty("--channel");
+
+  const onAir = isOnAir(program, now);
+  const when = onAir ? "On now"
+    : program.end <= now ? "Earlier"
+    : program.start - now < 3600 ? `Starts in ${Math.max(1, Math.round((program.start - now) / 60))} min`
+    : "Later";
+  $("#hero-eyebrow").textContent = `${channel.number} ${channel.name} · ${when}`;
+  $("#hero-title").textContent = program.title;
+  // Movies' subtitles are just their year, which the details line already covers.
+  const subtitle = program.type === "episode" ? program.subtitle ?? "" : "";
+  $("#hero-subtitle").textContent = subtitle;
+  $("#hero-subtitle").hidden = !subtitle;
+  $("#hero-meta").textContent = [
+    `${clockLabel(program.start)} – ${clockLabel(program.end)}`,
+    program.type === "movie" ? program.year : null,
+    program.genres?.[0],
+    durationLabel(program.end - program.start),
+    program.rating,
+  ].filter(Boolean).join(" · ");
+
+  $("#hero-watch").href = `#/watch/${channel.id}`;
+  $("#hero-watch-label").textContent = onAir ? "Watch Live" : `Watch ${channel.name} live`;
+}
+
+function pickProgram(channel, program) {
+  guidePick = { channelId: channel.id, start: program.start };
+  renderHero({ channel, program }, guideData.now);
+  for (const block of $("#guide-inner").querySelectorAll(".guide-program")) {
+    const picked = Number(block.dataset.channel) === channel.id && Number(block.dataset.start) === program.start;
+    block.classList.toggle("picked", picked);
+    block.setAttribute("aria-pressed", String(picked));
+  }
 }
 
 function renderGuide(guide) {
@@ -664,6 +741,10 @@ function renderGuide(guide) {
   $("#guide-earlier").disabled = guideStart - GUIDE_STEP < guide.now - GUIDE_LOOKBACK;
   $("#guide-later").disabled = guideStart + GUIDE_STEP > guide.now + GUIDE_LOOKAHEAD - GUIDE_WINDOW;
 
+  const pick = resolvePick(guide);
+  guidePick = pick ? { channelId: pick.channel.id, start: pick.program.start } : null;
+  renderHero(pick, guide.now);
+
   const makeTrack = () => {
     const track = document.createElement("div");
     track.className = "guide-track";
@@ -675,6 +756,7 @@ function renderGuide(guide) {
   header.className = "guide-row guide-times";
   const corner = document.createElement("div");
   corner.className = "guide-channel";
+  corner.textContent = "Channel";
   const times = makeTrack();
   for (let t = guideStart; t < windowEnd; t += HALF_HOUR) {
     const label = document.createElement("span");
@@ -689,6 +771,7 @@ function renderGuide(guide) {
   for (const channel of guide.channels) {
     const row = document.createElement("div");
     row.className = "guide-row";
+    if (channel.color) row.style.setProperty("--channel", channel.color);
 
     const cell = document.createElement("div");
     cell.className = "guide-channel";
@@ -724,21 +807,40 @@ function renderGuide(guide) {
     for (const program of channel.programs) {
       const left = Math.max(0, guideOffset(program.start));
       const right = Math.min(trackWidth, guideOffset(program.end));
-      const block = document.createElement("div");
+      const onAir = isOnAir(program, guide.now);
+      const picked = guidePick?.channelId === channel.id && guidePick.start === program.start;
+      const block = document.createElement("button");
+      block.type = "button";
       block.className = "guide-program";
-      const onAir = program.start <= guide.now && guide.now < program.end;
       block.classList.toggle("on-air", onAir);
-      if (onAir) block.addEventListener("click", () => { location.hash = `#/watch/${channel.id}`; });
-      if (channel.color) block.style.setProperty("--channel", channel.color);
+      block.classList.toggle("past", program.end <= guide.now);
+      block.classList.toggle("picked", picked);
+      block.setAttribute("aria-pressed", String(picked));
+      block.dataset.channel = channel.id;
+      block.dataset.start = program.start;
       block.style.left = `${left}px`;
-      block.style.width = `${Math.max(0, right - left - 2)}px`;
+      block.style.width = `${Math.max(0, right - left - 6)}px`;
       block.title = [program.title, program.subtitle, `${clockLabel(program.start)} – ${clockLabel(program.end)}`]
         .filter(Boolean).join("\n");
+      // The first click shows a program's details; clicking the one on now again tunes in.
+      block.addEventListener("click", () => {
+        if (block.classList.contains("picked") && isOnAir(program, nowSeconds())) {
+          location.hash = `#/watch/${channel.id}`;
+        } else {
+          pickProgram(channel, program);
+        }
+      });
+
       const title = document.createElement("strong");
       title.textContent = program.title;
-      const subtitle = document.createElement("small");
-      subtitle.textContent = program.subtitle ?? "";
-      block.append(title, subtitle);
+      block.append(title);
+      const detail = program.type === "episode" ? program.subtitle : null;
+      const line = onAir ? detail : [clockLabel(program.start), detail].filter(Boolean).join(" · ");
+      if (line) {
+        const small = document.createElement("small");
+        small.textContent = line;
+        block.append(small);
+      }
       track.append(block);
     }
     if (channel.programs.length === 0) {
@@ -758,17 +860,40 @@ function renderGuide(guide) {
     line.style.left = `calc(var(--guide-label) + ${guideOffset(guide.now)}px)`;
     inner.append(line);
   }
+
+  // On narrow screens, bring the current time into view rather than the start of the half hour.
+  if (guideNeedsScroll) {
+    guideNeedsScroll = false;
+    const scroll = $("#guide-scroll");
+    const label = $(".guide-channel").offsetWidth;
+    const visible = scroll.clientWidth - label;
+    const nowAt = guideOffset(guide.now);
+    const inWindow = guide.now >= guideStart && guide.now < windowEnd;
+    scroll.scrollLeft = inWindow && nowAt > visible / 3 ? nowAt - visible / 4 : 0;
+  }
 }
 
 function moveGuide(start) {
   guideStart = start;
-  $("#guide-scroll").scrollLeft = 0;
+  guideNeedsScroll = true;
   loadGuide().catch(() => {});
 }
 
 $("#guide-earlier").addEventListener("click", () => moveGuide(guideStart - GUIDE_STEP));
 $("#guide-later").addEventListener("click", () => moveGuide(guideStart + GUIDE_STEP));
-$("#guide-now").addEventListener("click", () => moveGuide(currentGuideStart()));
+$("#guide-now").addEventListener("click", () => {
+  guidePick = null;
+  moveGuide(currentGuideStart());
+});
+
+// The clock in the top bar.
+function tickClock() {
+  const now = new Date();
+  $("#clock").dateTime = now.toISOString();
+  $("#clock").textContent = now.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  setTimeout(tickClock, (60 - now.getSeconds()) * 1000 + 50);
+}
+tickClock();
 
 // ---- Player -------------------------------------------------------------------
 

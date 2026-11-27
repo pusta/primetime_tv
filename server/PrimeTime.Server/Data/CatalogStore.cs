@@ -26,6 +26,8 @@ public sealed record CatalogTitle(
     string? Overview,
     int AverageMinutes);
 
+public sealed record TitleFacts(IReadOnlyList<string> Genres, int? Year, string? Rating);
+
 public sealed record CatalogEpisode(
     string Id, int Season, int Episode, string Title, long RuntimeSeconds, DateTimeOffset? AirDate);
 
@@ -169,6 +171,45 @@ public sealed class CatalogStore(Database database, CollectionStore collections)
         }
 
         return fallbackYear is >= 1 and <= 9999 ? new DateTimeOffset(fallbackYear.Value, 1, 1, 0, 0, 0, TimeSpan.Zero) : null;
+    }
+
+    /// <summary>
+    /// Genres, year and age rating for the given movies and shows, for describing what's on.
+    /// Cheaper than <see cref="Load"/> when only a guide's worth of titles is needed.
+    /// </summary>
+    public Dictionary<string, TitleFacts> Facts(IReadOnlyCollection<string> movieIds, IReadOnlyCollection<string> showIds)
+    {
+        var facts = new Dictionary<string, TitleFacts>();
+        if (movieIds.Count == 0 && showIds.Count == 0)
+        {
+            return facts;
+        }
+
+        using var connection = database.Open();
+        foreach (var (table, ids) in new[] { ("movies", movieIds), ("shows", showIds) })
+        {
+            if (ids.Count == 0)
+            {
+                continue;
+            }
+
+            using var command = connection.CreateCommand();
+            command.CommandText = $"""
+                SELECT id, genres, year, official_rating FROM {table}
+                WHERE id IN (SELECT value FROM json_each($ids));
+                """;
+            command.Parameters.AddWithValue("$ids", JsonSerializer.Serialize(ids));
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                facts[reader.GetString(0)] = new TitleFacts(
+                    ReadList(reader.GetString(1)),
+                    reader.IsDBNull(2) ? null : reader.GetInt32(2),
+                    reader.IsDBNull(3) ? null : reader.GetString(3));
+            }
+        }
+
+        return facts;
     }
 
     private static List<string> ReadList(string json) => JsonSerializer.Deserialize<List<string>>(json) ?? [];

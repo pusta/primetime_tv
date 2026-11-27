@@ -9,14 +9,19 @@ public static class GuideEndpoints
     public static void MapGuideEndpoints(this WebApplication app)
     {
         // Every channel with its programs in a time window (Unix seconds).
-        app.MapGet("/api/guide", (long from, long to, ChannelStore channels, ScheduleStore schedule) =>
+        app.MapGet("/api/guide", (long from, long to, ChannelStore channels, ScheduleStore schedule, CatalogStore catalog) =>
         {
             if (to <= from || to - from > MaxWindowSeconds)
             {
                 return Results.BadRequest(new { error = "Ask for a window of up to 48 hours." });
             }
 
-            var byChannel = schedule.Range(from, to).ToLookup(e => e.ChannelId);
+            var entries = schedule.Range(from, to);
+            var byChannel = entries.ToLookup(e => e.ChannelId);
+            var facts = catalog.Facts(
+                entries.Where(e => e.ShowId is null).Select(e => e.ItemId).ToHashSet(),
+                entries.Where(e => e.ShowId is not null).Select(e => e.ShowId!).ToHashSet());
+            TitleFacts? FactsFor(ScheduleEntry e) => facts.GetValueOrDefault(e.ShowId ?? e.ItemId);
             return Results.Ok(new
             {
                 now = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
@@ -33,6 +38,11 @@ public static class GuideEndpoints
                         itemId = e.ItemId,
                         title = e.Title,
                         subtitle = e.Subtitle,
+                        season = e.Season,
+                        episode = e.Episode,
+                        genres = FactsFor(e)?.Genres.Take(2),
+                        year = FactsFor(e)?.Year,
+                        rating = FactsFor(e)?.Rating,
                         start = e.StartTs,
                         end = e.EndTs,
                     }),
