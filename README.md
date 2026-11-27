@@ -295,6 +295,17 @@ to transcode and what to pass along as it is, so PrimeTime never needs FFmpeg or
 pass through PrimeTime on its way to your browser, which keeps your Jellyfin API key on the server and
 means viewers only need to reach PrimeTime. It uses that machine's network bandwidth, not its CPU.
 
+## Streams
+
+*Settings → Streams* shows what's playing right now: the channel and program, who's watching and on
+what (a browser or a linked app, and its network address), whether Jellyfin is transcoding it or just
+repackaging it (hover over **Transcoding** to see why), the video format, and how much has been sent.
+A stream is **Paused** when its player hasn't asked for video for 30 seconds; after 5 minutes it's
+let go. **Stop** ends a stream, and the viewer's player says it was stopped instead of tuning in again.
+
+Below that are the last 10 streams that finished, with how long they ran and how they ended. Each
+program is its own stream, so watching a channel through several programs adds several entries.
+
 ## Apps
 
 The server is ready for the native tvOS, iOS and iPadOS apps; their API is in [docs/app-api.md](docs/app-api.md).

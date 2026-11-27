@@ -17,14 +17,66 @@ public sealed class PlaybackSession(string id, string itemId, string streamPath,
     public string StreamPath { get; } = streamPath;
     public string MasterQuery { get; } = masterQuery;
     public string PlaySessionId { get; } = playSessionId;
+    private long _bytesSent;
+
     public TimeSpan Idle => TimeSpan.FromMilliseconds(Environment.TickCount64 - Interlocked.Read(ref _lastUsed));
 
+    /// <summary>Its row in the stream history, which is also the ID Settings uses for it.</summary>
+    public long HistoryId { get; init; }
+    public long ChannelId { get; init; }
+    public long StartedTs { get; init; }
+    public StreamViewer Viewer { get; init; } = new("", "", null);
+    public string? Video { get; init; }
+
+    /// <summary>How Jellyfin delivers it: see <see cref="StreamDelivery"/>. An app can switch to the file itself.</summary>
+    public string Delivery { get; set; } = StreamDelivery.DirectStream;
+    public string? TranscodeReasons { get; init; }
+
+    public long BytesSent => Interlocked.Read(ref _bytesSent);
+
     public void Touch() => Interlocked.Exchange(ref _lastUsed, Environment.TickCount64);
+
+    public void Sent(long bytes) => Interlocked.Add(ref _bytesSent, bytes);
+}
+
+/// <summary>Who is watching: a signed-in user's name or an app's device name, what they use, and from where.</summary>
+public sealed record StreamViewer(string Name, string Client, string? Address);
+
+public static class StreamDelivery
+{
+    /// <summary>Jellyfin converts the video, the audio or both.</summary>
+    public const string Transcode = "transcode";
+
+    /// <summary>Jellyfin repackages the original video and audio into HLS without converting them.</summary>
+    public const string DirectStream = "direct-stream";
+
+    /// <summary>The player reads the original file.</summary>
+    public const string DirectPlay = "direct-play";
 }
 
 public sealed class PlaybackSessions
 {
     private readonly ConcurrentDictionary<string, PlaybackSession> _sessions = new();
+
+    // Streams stopped from Settings, so their players can be told why rather than quietly tuning in again.
+    private readonly ConcurrentDictionary<string, long> _stoppedByAdmin = new();
+    private static readonly TimeSpan StoppedRemembered = TimeSpan.FromHours(1);
+
+    public void MarkStoppedByAdmin(string id)
+    {
+        var now = Environment.TickCount64;
+        foreach (var (old, at) in _stoppedByAdmin)
+        {
+            if (now - at > StoppedRemembered.TotalMilliseconds)
+            {
+                _stoppedByAdmin.TryRemove(old, out _);
+            }
+        }
+
+        _stoppedByAdmin[id] = now;
+    }
+
+    public bool WasStoppedByAdmin(string id) => _stoppedByAdmin.ContainsKey(id);
 
     public void Add(PlaybackSession session) => _sessions[session.Id] = session;
 
@@ -40,6 +92,8 @@ public sealed class PlaybackSessions
     }
 
     public PlaybackSession? Remove(string id) => _sessions.TryRemove(id, out var session) ? session : null;
+
+    public IReadOnlyList<PlaybackSession> All() => _sessions.Values.ToList();
 
     public IReadOnlyList<PlaybackSession> RemoveIdle(TimeSpan olderThan)
     {
@@ -97,6 +151,7 @@ public sealed partial class PlaybackService(
     ChannelStore channels,
     ScheduleStore schedule,
     PlaybackSessions sessions,
+    StreamHistoryStore history,
     ILogger<PlaybackService> logger)
 {
     // A paused player stops asking for video, so this is how long a pause can last.
@@ -105,8 +160,8 @@ public sealed partial class PlaybackService(
 
     /// <summary>Starts a stream for the website. See the other overload.</summary>
     public Task<(Channel? Channel, PlayStart? Start)> StartAsync(
-        long channelId, StreamProfile profile, CancellationToken ct) =>
-        StartAsync(channelId, profile, null, null, ct);
+        long channelId, StreamProfile profile, StreamViewer viewer, CancellationToken ct) =>
+        StartAsync(channelId, profile, null, null, viewer, ct);
 
     /// <summary>
     /// Starts a stream for an app. With Auto, HDR and Dolby Vision programs in HEVC go to Apple's player,
@@ -114,13 +169,14 @@ public sealed partial class PlaybackService(
     /// audio for an HLS stream, which carries only one.
     /// </summary>
     public Task<(Channel? Channel, PlayStart? Start)> StartAsync(
-        long channelId, AppPlayer player, int? audioStreamIndex, CancellationToken ct) =>
+        long channelId, AppPlayer player, int? audioStreamIndex, StreamViewer viewer, CancellationToken ct) =>
         StartAsync(channelId, player == AppPlayer.Native ? StreamProfile.Native : StreamProfile.Mpv,
-            player, audioStreamIndex, ct);
+            player, audioStreamIndex, viewer, ct);
 
     /// <summary>Returns null if the channel doesn't exist, or a null program if nothing is on air.</summary>
     private async Task<(Channel? Channel, PlayStart? Start)> StartAsync(
-        long channelId, StreamProfile profile, AppPlayer? player, int? audioStreamIndex, CancellationToken ct)
+        long channelId, StreamProfile profile, AppPlayer? player, int? audioStreamIndex, StreamViewer viewer,
+        CancellationToken ct)
     {
         await StopIdleAsync(ct);
 
@@ -175,12 +231,29 @@ public sealed partial class PlaybackService(
             query += "&EnableSubtitlesInManifest=true";
         }
 
+        var reasons = TranscodeReasonsIn(query);
+        var delivery = reasons is null ? StreamDelivery.DirectStream : StreamDelivery.Transcode;
+        var video = DescribeVideo(source.Video);
+        var viewerName = viewer.Name.Length > 0 ? viewer.Name : "Unknown";
+        var historyId = history.Start(new StreamRecord(
+            0, now, null, null, channel.Id, channel.Number, channel.Name, program.Title, program.Subtitle,
+            viewerName, viewer.Client, viewer.Address, delivery, video, 0));
+
         var session = new PlaybackSession(
             RandomNumberGenerator.GetHexString(32, lowercase: true),
             program.ItemId,
             path[..path.LastIndexOf('/')],
             query,
-            info.PlaySessionId);
+            info.PlaySessionId)
+        {
+            HistoryId = historyId,
+            ChannelId = channel.Id,
+            StartedTs = now,
+            Viewer = viewer with { Name = viewerName },
+            Video = video,
+            Delivery = delivery,
+            TranscodeReasons = reasons,
+        };
         sessions.Add(session);
         return (channel, new PlayStart(
             session, channel, program, now, player, source,
@@ -196,6 +269,48 @@ public sealed partial class PlaybackService(
 
     [GeneratedRegex("""(?i)[?&]AudioStreamIndex=(\d+)""")]
     private static partial Regex AudioStreamIndexParameter();
+
+    /// <summary>
+    /// Why Jellyfin is converting the stream, from the stream URL it made, such as "VideoCodecNotSupported".
+    /// Null when it only repackages the video and audio, which costs it almost nothing.
+    /// </summary>
+    private static string? TranscodeReasonsIn(string query)
+    {
+        if (TranscodeReasonsParameter().Match(query) is not { Success: true } match)
+        {
+            return null;
+        }
+
+        var reasons = Uri.UnescapeDataString(match.Groups[1].Value)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(r => r.StartsWith("Video", StringComparison.Ordinal) || r.StartsWith("Audio", StringComparison.Ordinal))
+            .ToList();
+        return reasons.Count > 0 ? string.Join(", ", reasons) : null;
+    }
+
+    [GeneratedRegex("""(?i)[?&]TranscodeReasons=([^&]*)""")]
+    private static partial Regex TranscodeReasonsParameter();
+
+    /// <summary>For example "HEVC 4K HDR10" or "H264 1080p".</summary>
+    private static string? DescribeVideo(JellyfinMediaStream? video)
+    {
+        if (video is null)
+        {
+            return null;
+        }
+
+        var size = video.Height switch
+        {
+            >= 2000 => "4K",
+            >= 1400 => "1440p",
+            >= 1000 => "1080p",
+            >= 700 => "720p",
+            > 0 => "SD",
+            _ => null,
+        };
+        var range = video.VideoRangeType is { } type && type != "SDR" && type != "Unknown" ? type : null;
+        return string.Join(' ', new[] { video.Codec?.ToUpperInvariant(), size, range }.OfType<string>());
+    }
 
     /// <summary>Asks Jellyfin about the program a stream is playing. Null if the stream or item has gone.</summary>
     public async Task<ProgramInfo?> GetInfoAsync(string playId, CancellationToken ct)
@@ -255,8 +370,29 @@ public sealed partial class PlaybackService(
     {
         if (sessions.Remove(playId) is { } session)
         {
-            await StopEncodingAsync(session, ct);
+            await EndAsync(session, StreamEndReason.Stopped, ct);
         }
+    }
+
+    /// <summary>What's playing now, after letting go of streams nobody has asked for in a while.</summary>
+    public async Task<IReadOnlyList<PlaybackSession>> ActiveAsync(CancellationToken ct)
+    {
+        await StopIdleAsync(ct);
+        return sessions.All().OrderBy(s => s.Idle).ThenBy(s => s.StartedTs).ToList();
+    }
+
+    /// <summary>Stops a stream from Settings. The viewer's player stops getting video and shows an error.</summary>
+    public async Task<bool> StopByHistoryIdAsync(long historyId, CancellationToken ct)
+    {
+        if (sessions.All().FirstOrDefault(s => s.HistoryId == historyId) is not { } found ||
+            sessions.Remove(found.Id) is not { } session)
+        {
+            return false;
+        }
+
+        sessions.MarkStoppedByAdmin(session.Id);
+        await EndAsync(session, StreamEndReason.StoppedByAdmin, ct);
+        return true;
     }
 
     /// <summary>
@@ -313,8 +449,21 @@ public sealed partial class PlaybackService(
     {
         foreach (var session in sessions.RemoveIdle(IdleLimit))
         {
-            await StopEncodingAsync(session, ct);
+            await EndAsync(session, StreamEndReason.Idle, ct);
         }
+    }
+
+    private async Task EndAsync(PlaybackSession session, string reason, CancellationToken ct)
+    {
+        // An idle stream ended when it was last used, not when we noticed.
+        var ended = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        if (reason == StreamEndReason.Idle)
+        {
+            ended -= (long)session.Idle.TotalSeconds;
+        }
+
+        history.End(session.HistoryId, Math.Max(session.StartedTs, ended), reason, session.Delivery, session.BytesSent);
+        await StopEncodingAsync(session, ct);
     }
 
     private async Task StopEncodingAsync(PlaybackSession session, CancellationToken ct)

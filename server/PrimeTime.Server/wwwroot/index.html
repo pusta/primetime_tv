@@ -320,6 +320,7 @@
         <nav class="subnav" aria-label="Settings">
           <a href="#/settings/library" data-sub="library">Library</a>
           <a href="#/settings/scheduled-tasks" data-sub="tasks">Scheduled Tasks</a>
+          <a href="#/settings/streams" data-sub="streams">Streams</a>
           <a href="#/settings/devices" data-sub="devices">Devices</a>
           <a href="#/settings/account" data-sub="account">Account</a>
           <p class="server-version" id="server-version" hidden></p>
@@ -432,6 +433,26 @@
               <ul class="device-list" id="device-list"></ul>
               <p class="muted" id="devices-empty" hidden>No apps linked yet.</p>
               <p class="error" id="devices-error" role="alert" hidden></p>
+            </div>
+          </div>
+          <div id="settings-streams" hidden>
+            <h2 class="section-title">Streams</h2>
+            <div class="card">
+              <div class="card-head">
+                <h2>Now playing</h2>
+                <span class="muted" id="streams-count"></span>
+              </div>
+              <ul class="stream-list" id="streams-active"></ul>
+              <p class="muted" id="streams-none" hidden>Nothing is playing right now.</p>
+              <p class="error" id="streams-error" role="alert" hidden></p>
+            </div>
+            <div class="card">
+              <div class="card-head">
+                <h2>Recent</h2>
+                <span class="muted">Last 10</span>
+              </div>
+              <ul class="stream-history" id="streams-recent"></ul>
+              <p class="muted" id="streams-recent-none" hidden>Streams appear here once they finish.</p>
             </div>
           </div>
           <div id="settings-account" hidden>
