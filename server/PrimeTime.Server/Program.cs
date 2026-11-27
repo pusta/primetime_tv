@@ -57,6 +57,7 @@ builder.Services.AddSingleton<ChannelColors>();
 builder.Services.AddSingleton<ScheduleStore>();
 builder.Services.AddSingleton<ScheduleService>();
 builder.Services.AddSingleton<PlaybackSessions>();
+builder.Services.AddSingleton<StreamHistoryStore>();
 builder.Services.AddScoped<PlaybackService>();
 
 builder.Services.AddSingleton<IScheduledTask, LibraryScanTask>();
@@ -138,6 +139,7 @@ app.MapTaskEndpoints();
 app.MapChannelEndpoints();
 app.MapGuideEndpoints();
 app.MapPlaybackEndpoints();
+app.MapStreamEndpoints();
 app.MapDeviceEndpoints();
 app.MapAppApiEndpoints();
 

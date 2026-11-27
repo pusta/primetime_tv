@@ -174,7 +174,7 @@ public static class AppApiEndpoints
         });
 
         signedIn.MapPost("/channels/{id:long}/play", async (
-            long id, AppPlayRequest? body, PlaybackService playback, CancellationToken ct) =>
+            long id, AppPlayRequest? body, HttpContext http, PlaybackService playback, CancellationToken ct) =>
         {
             AppPlayer? player = body?.Player switch
             {
@@ -190,7 +190,13 @@ public static class AppApiEndpoints
 
             try
             {
-                var (channel, start) = await playback.StartAsync(id, player.Value, body?.AudioStreamIndex, ct);
+                var platform = http.User.FindFirstValue(AppTokenHandler.PlatformClaim);
+                var viewer = new StreamViewer(
+                    http.User.Identity?.Name ?? "",
+                    platform is null ? "PrimeTime app" : $"PrimeTime app on {platform}",
+                    http.Connection.RemoteIpAddress?.ToString());
+                var (channel, start) = await playback.StartAsync(
+                    id, player.Value, body?.AudioStreamIndex, viewer, ct);
                 if (channel is null)
                 {
                     return Results.NotFound(new { error = "not_found" });

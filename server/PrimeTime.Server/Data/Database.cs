@@ -264,6 +264,27 @@ public sealed class Database
         ALTER TABLE channels ADD COLUMN people TEXT NOT NULL DEFAULT '[]';
         ALTER TABLE channels ADD COLUMN similar_count INTEGER;
         """,
+
+        // 12: A log of streams for Settings -> Streams. Channels are copied in, since they can be deleted.
+        """
+        CREATE TABLE stream_history (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            started_ts     INTEGER NOT NULL,
+            ended_ts       INTEGER,
+            end_reason     TEXT,
+            channel_id     INTEGER NOT NULL,
+            channel_number INTEGER NOT NULL,
+            channel_name   TEXT NOT NULL,
+            title          TEXT NOT NULL,
+            subtitle       TEXT,
+            viewer         TEXT NOT NULL,
+            client         TEXT NOT NULL,
+            address        TEXT,
+            delivery       TEXT NOT NULL,
+            video          TEXT,
+            bytes_sent     INTEGER NOT NULL DEFAULT 0
+        );
+        """,
     ];
 
     public Database(PrimeTimeOptions options, ILogger<Database> logger)

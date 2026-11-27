@@ -12,11 +12,16 @@ public static partial class PlaybackEndpoints
         var api = app.MapGroup("/api").RequireAuthorization();
 
         // Tunes in: what's on air now, how far into it we are, and where to get the stream.
-        api.MapPost("/channels/{id:long}/play", async (long id, PlaybackService playback, CancellationToken ct) =>
+        api.MapPost("/channels/{id:long}/play", async (
+            long id, HttpContext http, PlaybackService playback, CancellationToken ct) =>
         {
             try
             {
-                var (channel, start) = await playback.StartAsync(id, StreamProfile.Compatible, ct);
+                var viewer = new StreamViewer(
+                    http.User.Identity?.Name ?? "",
+                    StreamEndpoints.DescribeBrowser(http.Request.Headers.UserAgent.ToString()),
+                    http.Connection.RemoteIpAddress?.ToString());
+                var (channel, start) = await playback.StartAsync(id, StreamProfile.Compatible, viewer, ct);
                 if (channel is null)
                 {
                     return Results.NotFound(new { error = "That channel doesn't exist." });
@@ -84,7 +89,7 @@ public static partial class PlaybackEndpoints
         if (!StreamFile().IsMatch(path) || sessions.Use(playId) is not { } session ||
             connections.Get() is not { } connection)
         {
-            return Results.NotFound();
+            return StreamGone(playId, sessions);
         }
 
         var ct = http.RequestAborted;
@@ -118,7 +123,7 @@ public static partial class PlaybackEndpoints
 
             http.Response.ContentType = upstream.Content.Headers.ContentType?.ToString() ?? "video/mp2t";
             http.Response.ContentLength = upstream.Content.Headers.ContentLength;
-            await upstream.Content.CopyToAsync(http.Response.Body, ct);
+            await CopyCountingAsync(upstream, http.Response.Body, session, ct);
             return Results.Empty;
         }
         catch (JellyfinException)
@@ -131,6 +136,33 @@ public static partial class PlaybackEndpoints
         }
     }
 
+    /// <summary>410 for a stream stopped from Settings, so the player says so instead of tuning in again.</summary>
+    private static IResult StreamGone(string playId, PlaybackSessions sessions) =>
+        sessions.WasStoppedByAdmin(playId)
+            ? Results.Json(new { error = "stopped_by_admin" }, statusCode: StatusCodes.Status410Gone)
+            : Results.NotFound();
+
+    /// <summary>Copies the video to the viewer, adding up how much was sent for Settings -> Streams.</summary>
+    private static async Task CopyCountingAsync(
+        HttpResponseMessage upstream, Stream destination, PlaybackSession session, CancellationToken ct)
+    {
+        await using var source = await upstream.Content.ReadAsStreamAsync(ct);
+        var buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(81920);
+        try
+        {
+            int read;
+            while ((read = await source.ReadAsync(buffer, ct)) > 0)
+            {
+                await destination.WriteAsync(buffer.AsMemory(0, read), ct);
+                session.Sent(read);
+            }
+        }
+        finally
+        {
+            System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
     /// <summary>Passes the original file through, so a capable player needs no transcoding at all.</summary>
     public static async Task<IResult> RelayDirectAsync(
         string playId, HttpContext http, PlaybackSessions sessions,
@@ -138,7 +170,7 @@ public static partial class PlaybackEndpoints
     {
         if (sessions.Use(playId) is not { } session || connections.Get() is not { } connection)
         {
-            return Results.NotFound();
+            return StreamGone(playId, sessions);
         }
 
         var ct = http.RequestAborted;
@@ -164,7 +196,8 @@ public static partial class PlaybackEndpoints
                 http.Response.Headers.ContentRange = contentRange.ToString();
             }
 
-            await upstream.Content.CopyToAsync(http.Response.Body, ct);
+            session.Delivery = StreamDelivery.DirectPlay;
+            await CopyCountingAsync(upstream, http.Response.Body, session, ct);
             return Results.Empty;
         }
         catch (JellyfinException)

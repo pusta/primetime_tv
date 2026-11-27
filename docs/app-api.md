@@ -163,6 +163,10 @@ time since you tuned in.
 with no requests for 5 minutes is cleaned up automatically, and then returns `404`. A paused player
 should call `play` again when it resumes after that long.
 
+**Stopped by an admin:** an admin can stop any stream under *Settings → Streams*. Its URLs then return
+`410 Gone` with `{"error": "stopped_by_admin"}` for an hour. Show a message and wait for the viewer to
+choose a channel again, rather than calling `play` on your own.
+
 ## App Transport Security
 
 A home PrimeTime server usually runs on plain HTTP, so the app needs `NSAllowsLocalNetworking` for

@@ -16,6 +16,7 @@ public sealed class AppTokenHandler(
     public const string SchemeName = "AppToken";
     public const string PolicyName = "App";
     public const string DeviceClaim = "primetime:device";
+    public const string PlatformClaim = "primetime:platform";
 
     protected override Task<AuthenticateResult> HandleAuthenticateAsync()
     {
@@ -30,12 +31,17 @@ public sealed class AppTokenHandler(
             return Task.FromResult(AuthenticateResult.Fail("Unknown token."));
         }
 
-        var identity = new ClaimsIdentity(
-            [
-                new Claim(ClaimTypes.Name, device.Name),
-                new Claim(DeviceClaim, device.Id.ToString()),
-            ],
-            SchemeName);
+        List<Claim> claims =
+        [
+            new Claim(ClaimTypes.Name, device.Name),
+            new Claim(DeviceClaim, device.Id.ToString()),
+        ];
+        if (!string.IsNullOrWhiteSpace(device.Platform))
+        {
+            claims.Add(new Claim(PlatformClaim, device.Platform));
+        }
+
+        var identity = new ClaimsIdentity(claims, SchemeName);
         return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName)));
     }
 

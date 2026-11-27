@@ -103,12 +103,14 @@ async function route() {
   $("#server-version").hidden = !session.version;
   const sub = location.hash.startsWith("#/settings/scheduled-tasks") ? "tasks"
     : location.hash.startsWith("#/settings/account") ? "account"
-    : location.hash.startsWith("#/settings/devices") ? "devices" : "library";
+    : location.hash.startsWith("#/settings/devices") ? "devices"
+    : location.hash.startsWith("#/settings/streams") ? "streams" : "library";
   setActiveLinks(".subnav a", "sub", sub);
   $("#settings-library").hidden = sub !== "library";
   $("#settings-tasks").hidden = sub !== "tasks";
   $("#settings-account").hidden = sub !== "account";
   $("#settings-devices").hidden = sub !== "devices";
+  $("#settings-streams").hidden = sub !== "streams";
 
   if (sub === "tasks") {
     taskCards.clear();
@@ -118,6 +120,8 @@ async function route() {
     await loadLibraryPage();
   } else if (sub === "devices") {
     await loadDevices();
+  } else if (sub === "streams") {
+    await loadStreams();
   } else {
     $("#password-form").reset();
     setMessage($("#password-form"), null);
@@ -255,6 +259,164 @@ async function decideLink(action, done) {
 
 $("#link-approve").addEventListener("click", () => decideLink("approve", "Device linked. You can go back to it now."));
 $("#link-deny").addEventListener("click", () => decideLink("deny", "Cancelled. The device wasn't linked."));
+
+// ---- Streams -------------------------------------------------------------------
+
+const STREAMS_REFRESH_MS = 5000;
+const DELIVERY_NAMES = {
+  "transcode": "Transcoding",
+  "direct-stream": "Direct stream",
+  "direct-play": "Direct play",
+};
+const END_REASONS = {
+  stopped: "Stopped",
+  idle: "Timed out",
+  admin: "Stopped from Settings",
+  interrupted: "Server restarted",
+};
+
+function formatBytes(bytes) {
+  if (bytes < 1e6) return `${Math.round(bytes / 1e3)} KB`;
+  if (bytes < 1e9) return `${(bytes / 1e6).toFixed(bytes < 1e8 ? 1 : 0)} MB`;
+  return `${(bytes / 1e9).toFixed(2)} GB`;
+}
+
+function formatMinutes(seconds) {
+  const minutes = Math.max(0, Math.round(seconds / 60));
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  return minutes % 60 ? `${hours} h ${minutes % 60} min` : `${hours} h`;
+}
+
+function element(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text != null) node.textContent = text;
+  return node;
+}
+
+// The viewer's network address. Streams to the machine PrimeTime runs on come from the loopback address.
+function describeAddress(address) {
+  if (!address) return null;
+  const plain = address.replace(/^::ffff:/, "");
+  return plain === "::1" || plain === "127.0.0.1" ? "this computer" : plain;
+}
+
+function channelLabel(channel) {
+  const label = element("span", "stream-channel");
+  if (channel?.color) label.style.setProperty("--channel", channel.color);
+  label.append(element("b", null, channel?.number ?? "?"), " ", channel?.name ?? "Deleted channel");
+  return label;
+}
+
+function deliveryTag(stream) {
+  const tag = element("span", `tag delivery ${stream.delivery}`, DELIVERY_NAMES[stream.delivery] ?? stream.delivery);
+  if (stream.transcodeReasons) tag.title = `Why Jellyfin is converting it: ${stream.transcodeReasons}`;
+  return tag;
+}
+
+async function loadStreams() {
+  clearTimeout(pollTimer);
+  try {
+    const data = await api("GET", "/api/streams");
+    $("#streams-error").hidden = true;
+    renderActiveStreams(data);
+    renderRecentStreams(data.recent);
+  } catch (err) {
+    $("#streams-error").hidden = false;
+    $("#streams-error").textContent = err.message;
+  }
+  pollTimer = setTimeout(() => {
+    if (location.hash.startsWith("#/settings/streams")) loadStreams();
+  }, STREAMS_REFRESH_MS);
+}
+
+function renderActiveStreams({ now, active }) {
+  $("#streams-count").textContent = active.length ? `${active.length} playing` : "";
+  $("#streams-none").hidden = active.length > 0;
+  const list = $("#streams-active");
+  list.replaceChildren();
+  for (const stream of active) {
+    const item = element("li", "stream");
+    if (stream.channel?.color) item.style.setProperty("--channel", stream.channel.color);
+
+    const head = element("div", "stream-head");
+    const state = element("span", `stream-state ${stream.state}`, stream.state === "playing" ? "Playing" : "Paused");
+    head.append(channelLabel(stream.channel), state);
+
+    const program = stream.program;
+    const title = element("strong", "stream-title", program?.title ?? "Nothing on air");
+    const subtitle = program?.type === "episode" && program.subtitle ? element("span", "stream-subtitle", program.subtitle) : null;
+
+    const progress = element("div", "stream-progress");
+    if (program) {
+      const bar = element("div", "bar");
+      const fill = element("span");
+      fill.style.width = `${Math.min(100, Math.max(0, ((now - program.start) / (program.end - program.start)) * 100))}%`;
+      bar.append(fill);
+      progress.append(element("small", null, clockLabel(program.start)), bar, element("small", null, clockLabel(program.end)));
+    }
+
+    const who = element("p", "stream-who", [stream.viewer, stream.client, describeAddress(stream.address)].filter(Boolean).join(" · "));
+
+    const watched = now - stream.started;
+    const tags = element("div", "stream-tags");
+    tags.append(deliveryTag(stream));
+    if (stream.video) tags.append(element("span", "tag", stream.video));
+    tags.append(element("span", "tag", watched < 60 ? "Started just now" : `Watching ${formatMinutes(watched)}`));
+    if (stream.bytesSent > 0) {
+      const rate = watched > 10 ? ` · ${((stream.bytesSent * 8) / watched / 1e6).toFixed(1)} Mbps average` : "";
+      tags.append(element("span", "tag", `${formatBytes(stream.bytesSent)} sent${rate}`));
+    }
+
+    const stop = element("button", "danger link", "Stop");
+    stop.type = "button";
+    stop.setAttribute("aria-label", `Stop ${stream.viewer}'s stream of ${stream.channel?.name ?? "this channel"}`);
+    stop.addEventListener("click", async () => {
+      if (!confirm(`Stop ${stream.viewer}'s stream? Their player will stop.`)) return;
+      try {
+        await api("DELETE", `/api/streams/${stream.id}`);
+      } catch (err) {
+        $("#streams-error").hidden = false;
+        $("#streams-error").textContent = err.message;
+      }
+      await loadStreams();
+    });
+
+    const body = element("div", "stream-body");
+    body.append(title);
+    if (subtitle) body.append(subtitle);
+    body.append(progress, who, tags);
+    const foot = element("div", "stream-actions");
+    foot.append(stop);
+    item.append(head, body, foot);
+    list.append(item);
+  }
+}
+
+function renderRecentStreams(recent) {
+  $("#streams-recent-none").hidden = recent.length > 0;
+  const list = $("#streams-recent");
+  list.replaceChildren();
+  for (const stream of recent) {
+    const item = element("li");
+    const main = element("div", "history-main");
+    const line = element("div", "history-title");
+    line.append(channelLabel(stream.channel), element("span", null, stream.title));
+    main.append(line);
+    const length = stream.ended ? formatMinutes(stream.ended - stream.started) : null;
+    main.append(element("small", null, [
+      formatTime(stream.started * 1000),
+      length === "0 min" ? "under a minute" : length,
+      [stream.viewer, stream.client].filter(Boolean).join(" · "),
+      stream.bytesSent > 0 ? formatBytes(stream.bytesSent) : null,
+    ].filter(Boolean).join(" · ")));
+    const side = element("div", "history-side");
+    side.append(deliveryTag(stream), element("small", "muted", END_REASONS[stream.endReason] ?? stream.endReason));
+    item.append(main, side);
+    list.append(item);
+  }
+}
 
 async function loadDevices() {
   $("#devices-error").hidden = true;
@@ -1055,7 +1217,10 @@ function attachStream(url, offset) {
     stream.hls = hls;
     hls.on(Hls.Events.MANIFEST_PARSED, startVideo);
     hls.on(Hls.Events.FRAG_BUFFERED, skipLeadingGap);
-    hls.on(Hls.Events.ERROR, (_, data) => { if (data.fatal) handleStreamFailure(); });
+    hls.on(Hls.Events.ERROR, (_, data) => {
+      if (data.response?.code === 410) return stoppedFromSettings();
+      if (data.fatal) handleStreamFailure();
+    });
     hls.loadSource(url);
     hls.attachMedia(playerVideo);
   } else if (playerVideo.canPlayType("application/vnd.apple.mpegurl")) {
@@ -1067,6 +1232,13 @@ function attachStream(url, offset) {
   } else {
     showPlayerError("This browser can't play the stream.");
   }
+}
+
+// An admin stopped this stream under Settings -> Streams. Don't quietly tune in again.
+function stoppedFromSettings() {
+  if (!stream) return;
+  stopStream();
+  showPlayerError("This stream was stopped from Settings. Choose the channel again to keep watching.");
 }
 
 function handleStreamFailure() {
