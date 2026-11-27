@@ -18,13 +18,19 @@ public static class AuthEndpoints
         var api = app.MapGroup("/api");
 
         // Tells the UI which screen to show: create admin, login, first-run setup, or the app.
-        api.MapGet("/session", (HttpContext http, AdminUserStore users, SettingsStore settings) => Results.Ok(new
+        // The server version is only shared with signed-in users.
+        api.MapGet("/session", (HttpContext http, AdminUserStore users, SettingsStore settings) =>
         {
-            needsSetup = !users.AnyExist(),
-            setupComplete = settings.IsSetupComplete(),
-            authenticated = http.User.Identity?.IsAuthenticated == true,
-            username = http.User.Identity?.Name,
-        }));
+            var authenticated = http.User.Identity?.IsAuthenticated == true;
+            return Results.Ok(new
+            {
+                needsSetup = !users.AnyExist(),
+                setupComplete = settings.IsSetupComplete(),
+                authenticated,
+                username = http.User.Identity?.Name,
+                version = authenticated ? AppInfo.Version : null,
+            });
+        });
 
         // Creates the first admin account. Only works while no admin exists.
         api.MapPost("/setup", async (CredentialsRequest body, HttpContext http, AdminUserStore users, SessionStore sessions) =>

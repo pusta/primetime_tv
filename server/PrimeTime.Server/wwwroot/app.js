@@ -99,6 +99,8 @@ async function route() {
   if (!inSettings) return routeGuide();
 
   show("settings-view");
+  $("#server-version").textContent = session.version ? `PrimeTime ${session.version}` : "";
+  $("#server-version").hidden = !session.version;
   const sub = location.hash.startsWith("#/settings/scheduled-tasks") ? "tasks"
     : location.hash.startsWith("#/settings/account") ? "account"
     : location.hash.startsWith("#/settings/devices") ? "devices" : "library";
