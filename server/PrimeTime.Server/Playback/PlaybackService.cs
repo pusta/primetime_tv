@@ -259,6 +259,49 @@ public sealed partial class PlaybackService(
         }
     }
 
+    /// <summary>
+    /// Drops the versions of an HDR video that Jellyfin converts, for players that can't show HDR, from a master
+    /// playlist that also offers the video copied untouched. Converting 4K as it plays is too slow for most servers,
+    /// and Apple's player starts on a converted version while the TV is still in SDR, then waits on segments that
+    /// don't come in time. A playlist with no copied version, or nothing but copied ones, is left alone.
+    /// </summary>
+    public static string KeepCopiedVideo(string playlist)
+    {
+        var lines = playlist.Split('\n');
+        var variants = new List<(int Info, int Uri, bool Converted)>();
+        for (var i = 0; i < lines.Length; i++)
+        {
+            if (!lines[i].StartsWith("#EXT-X-STREAM-INF:", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            // The variant's URI is the next line that isn't blank or a tag.
+            var uri = i + 1;
+            while (uri < lines.Length && (lines[uri].Trim().Length == 0 || lines[uri].StartsWith('#')))
+            {
+                uri++;
+            }
+
+            if (uri < lines.Length)
+            {
+                variants.Add((i, uri, ConvertedVideo().IsMatch(lines[uri])));
+                i = uri;
+            }
+        }
+
+        if (!variants.Any(v => v.Converted) || variants.All(v => v.Converted))
+        {
+            return playlist;
+        }
+
+        var dropped = variants.Where(v => v.Converted).SelectMany(v => new[] { v.Info, v.Uri }).ToHashSet();
+        return string.Join('\n', lines.Where((_, index) => !dropped.Contains(index)));
+    }
+
+    [GeneratedRegex("""(?i)[?&]AllowVideoStreamCopy=false(&|$|\s)""")]
+    private static partial Regex ConvertedVideo();
+
     /// <summary>Takes the key out of Jellyfin's URLs. The relay authenticates with a header instead.</summary>
     public static string RemoveApiKey(string text) =>
         ApiKeyParameter().Replace(text, m => m.Groups[2].Length > 0 ? m.Groups[1].Value : "");
