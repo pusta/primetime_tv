@@ -73,7 +73,10 @@ public static partial class PlaybackEndpoints
         });
     }
 
-    /// <summary>Passes Jellyfin's playlists and video segments through unchanged, apart from removing the key.</summary>
+    /// <summary>
+    /// Passes Jellyfin's playlists and video segments through unchanged, apart from removing the key and dropping
+    /// converted versions of the video from the master playlist (see <see cref="PlaybackService.KeepCopiedVideo"/>).
+    /// </summary>
     public static async Task<IResult> RelayStreamAsync(
         string playId, string path, HttpContext http, PlaybackSessions sessions,
         JellyfinConnectionStore connections, SettingsStore settings, JellyfinClient client)
@@ -104,8 +107,13 @@ public static partial class PlaybackEndpoints
 
             if (path.EndsWith(".m3u8", StringComparison.Ordinal))
             {
-                var playlist = await upstream.Content.ReadAsStringAsync(ct);
-                return Results.Text(PlaybackService.RemoveApiKey(playlist), "application/vnd.apple.mpegurl");
+                var playlist = PlaybackService.RemoveApiKey(await upstream.Content.ReadAsStringAsync(ct));
+                if (path == "master.m3u8")
+                {
+                    playlist = PlaybackService.KeepCopiedVideo(playlist);
+                }
+
+                return Results.Text(playlist, "application/vnd.apple.mpegurl");
             }
 
             http.Response.ContentType = upstream.Content.Headers.ContentType?.ToString() ?? "video/mp2t";
