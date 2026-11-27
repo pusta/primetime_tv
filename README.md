@@ -282,8 +282,10 @@ server removes them, because its items are different.
 
 ## Watching
 
-Select a channel in the Guide, or the program on air, to join it where the schedule says it is now, as
-with live TV. **Start from Beginning** rewinds to the start of the current program and **Back to Live**
+The top of the Guide shows the program you've picked: its channel, times, genre, length and rating.
+It starts on what's on now. Click any program in the grid to see its details there, and **Watch Live**
+(or click the program again, if it's on now) to tune in. Selecting a channel's name tunes in too.
+You join where the schedule says the channel is now, as with live TV. **Start from Beginning** rewinds to the start of the current program and **Back to Live**
 returns to the live position. **Info** shows the description, cast and other details Jellyfin has for
 the program. When a program ends the channel moves on to whatever's airing next.
 Use the pencil next to a channel to edit it.
